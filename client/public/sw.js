@@ -1,5 +1,23 @@
-const CACHE_NAME = "sembarang-budal-v1";
+const CACHE_NAME = "sembarang-budal-v2";
 const APP_SHELL = ["/", "/manifest.json", "/icon-192.svg", "/icon-512.svg"];
+
+function shouldHandleRequest(request) {
+  const url = new URL(request.url);
+
+  if (request.method !== "GET") {
+    return false;
+  }
+
+  if (url.origin !== self.location.origin) {
+    return false;
+  }
+
+  if (url.pathname.startsWith("/api")) {
+    return false;
+  }
+
+  return true;
+}
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)));
@@ -23,7 +41,7 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
-  if (event.request.method !== "GET") {
+  if (!shouldHandleRequest(event.request)) {
     return;
   }
 
@@ -33,8 +51,12 @@ self.addEventListener("fetch", (event) => {
         return cached;
       }
 
-      return fetch(event.request)
+      return fetch(event.request, { cache: "no-cache" })
         .then((response) => {
+          if (!response.ok) {
+            return response;
+          }
+
           const responseClone = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseClone));
           return response;

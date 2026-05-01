@@ -67,12 +67,90 @@ button:disabled {
   box-shadow: 0 18px 50px rgba(15, 23, 42, 0.28);
 }
 
+.middle-floating-panel {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  z-index: 1000;
+  width: min(360px, calc(100vw - 2rem));
+  padding: 1rem;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 18px 50px rgba(15, 23, 42, 0.28);
+  border: 1px solid #dbeafe;
+}
+
 .sidebar-top {
   margin-bottom: 1rem;
 }
 
+.eyebrow {
+  margin: 0 0 0.35rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  font-weight: 800;
+  color: #2563eb;
+}
+
 .sidebar-actions {
   margin-top: 1rem;
+}
+
+.radius-group {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.radius-group button {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.radius-group button.active {
+  background: #1d4ed8;
+  color: #fff;
+}
+
+.middle-btn {
+  margin-top: 0.75rem;
+}
+
+.middle-summary {
+  margin: 0.75rem 0 0;
+  color: #334155;
+}
+
+.middle-summary.muted {
+  color: #64748b;
+}
+
+.middle-results {
+  margin-top: 1rem;
+}
+
+.middle-results h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.middle-results ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.middle-results li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
 }
 
 .input-wrap label {
@@ -214,6 +292,13 @@ button:disabled {
 }
 
 @media (max-width: 640px) {
+  .middle-floating-panel {
+    top: 0.75rem;
+    left: 0.75rem;
+    right: 0.75rem;
+    width: auto;
+  }
+
   .sidebar {
     top: auto;
     left: 0.75rem;
