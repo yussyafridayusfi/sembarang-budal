@@ -45,12 +45,12 @@ export async function saveLocations(locations) {
   });
 }
 
-export async function findPlacesInMiddle(lat, lng, radius) {
+export async function findPlacesNearCenter(lat, lng, radius) {
   const query = new URLSearchParams({
     lat: String(lat),
     lng: String(lng),
     radius: String(radius)
   });
 
-  return requestJson(`${API_BASE}/places/middle?${query.toString()}`);
+  return requestJson(`${API_BASE}/places/center?${query.toString()}`);
 }
