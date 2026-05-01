@@ -126,7 +126,7 @@ router.post("/locations", async (req, res) => {
   }
 });
 
-router.get("/places/middle", async (req, res) => {
+async function handleCenterPlacesRequest(req, res) {
   const lat = toNumber(req.query.lat);
   const lng = toNumber(req.query.lng);
   const radius = toNumber(req.query.radius);
@@ -188,13 +188,16 @@ router.get("/places/middle", async (req, res) => {
       .sort((a, b) => a.distance - b.distance);
 
     return res.json({
-      midpoint: { lat, lng },
+      center: { lat, lng },
       radius,
       places
     });
   } catch (error) {
-    return res.status(500).json({ error: error.message || "Failed to search middle places." });
+    return res.status(500).json({ error: error.message || "Failed to search meeting places." });
   }
-});
+}
+
+router.get("/places/center", handleCenterPlacesRequest);
+router.get("/places/middle", handleCenterPlacesRequest);
 
 export default router;

@@ -67,7 +67,7 @@ button:disabled {
   box-shadow: 0 18px 50px rgba(15, 23, 42, 0.28);
 }
 
-.middle-floating-panel {
+.meeting-floating-panel {
   position: absolute;
   top: 1rem;
   right: 1rem;
@@ -124,6 +124,12 @@ button:disabled {
 
 .middle-summary.muted {
   color: #64748b;
+}
+
+.place-meta {
+  margin: 0.2rem 0 0;
+  font-size: 0.85rem;
+  color: #475569;
 }
 
 .middle-results {
@@ -292,7 +298,7 @@ button:disabled {
 }
 
 @media (max-width: 640px) {
-  .middle-floating-panel {
+  .meeting-floating-panel {
     top: 0.75rem;
     left: 0.75rem;
     right: 0.75rem;
