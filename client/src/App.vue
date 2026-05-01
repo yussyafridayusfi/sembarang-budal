@@ -2,7 +2,8 @@
 import { computed, onMounted, ref } from "vue";
 import LocationInput from "./components/LocationInput.vue";
 import MapView from "./components/MapView.vue";
-import { fetchLocations, findPlacesNearCenter, saveLocations } from "./services/api";
+import PlaceDetailModal from "./components/PlaceDetailModal.vue";
+import { fetchLocations, fetchPlaceDetails, findPlacesNearCenter, saveLocations } from "./services/api";
 
 const draftLocations = ref(["", ""]);
 const savedLocations = ref([]);
@@ -11,6 +12,12 @@ const meetingLoading = ref(false);
 const error = ref("");
 const meetingRadius = ref(1000);
 const meetingSearchResult = ref(null);
+const selectedPlace = ref(null);
+const selectedPlaceDetails = ref(null);
+const placeDetailLoading = ref(false);
+const placeDetailError = ref("");
+const isPlaceDetailOpen = ref(false);
+const placeDetailsCache = new Map();
 
 const filledLocations = computed(() =>
   draftLocations.value.map((item) => item.trim()).filter(Boolean)
@@ -79,6 +86,9 @@ async function loadSavedLocations() {
     const response = await fetchLocations();
     savedLocations.value = response.locations || [];
     meetingSearchResult.value = null;
+    selectedPlace.value = null;
+    selectedPlaceDetails.value = null;
+    isPlaceDetailOpen.value = false;
   } catch (err) {
     error.value = err.message;
   } finally {
@@ -99,6 +109,9 @@ async function handleSave() {
     const response = await saveLocations(filledLocations.value);
     savedLocations.value = response.locations || [];
     meetingSearchResult.value = null;
+    selectedPlace.value = null;
+    selectedPlaceDetails.value = null;
+    isPlaceDetailOpen.value = false;
   } catch (err) {
     error.value = err.message;
   } finally {
@@ -151,6 +164,9 @@ async function handleFindMeetingPoint() {
       centerMethod: center.method,
       places: rankedPlaces
     };
+    selectedPlace.value = null;
+    selectedPlaceDetails.value = null;
+    isPlaceDetailOpen.value = false;
   } catch (err) {
     meetingSearchResult.value = {
       center,
@@ -161,6 +177,45 @@ async function handleFindMeetingPoint() {
     error.value = err.message;
   } finally {
     meetingLoading.value = false;
+  }
+}
+
+async function openPlaceDetails(place) {
+  selectedPlace.value = place;
+  isPlaceDetailOpen.value = true;
+  placeDetailError.value = "";
+
+  const cacheKey = place.id || `${place.name}-${place.lat}-${place.lng}`;
+  if (placeDetailsCache.has(cacheKey)) {
+    selectedPlaceDetails.value = placeDetailsCache.get(cacheKey);
+    return;
+  }
+
+  placeDetailLoading.value = true;
+  selectedPlaceDetails.value = null;
+
+  try {
+    const details = await fetchPlaceDetails(place);
+    placeDetailsCache.set(cacheKey, details);
+    selectedPlaceDetails.value = details;
+  } catch (err) {
+    placeDetailError.value = err.message;
+  } finally {
+    placeDetailLoading.value = false;
+  }
+}
+
+function closePlaceDetails() {
+  isPlaceDetailOpen.value = false;
+}
+
+async function copyPlaceLocation(place) {
+  const coordinates = `${place.coordinates?.lat ?? place.lat}, ${place.coordinates?.lng ?? place.lng}`;
+
+  try {
+    await navigator.clipboard.writeText(coordinates);
+  } catch {
+    error.value = "Failed to copy location.";
   }
 }
 
@@ -177,7 +232,12 @@ onMounted(loadSavedLocations);
 
 <template>
   <main class="app-shell">
-    <MapView :locations="savedLocations" :meeting-search="meetingSearchResult" />
+    <MapView
+      :locations="savedLocations"
+      :meeting-search="meetingSearchResult"
+      :selected-place="selectedPlace"
+      @select-place="openPlaceDetails"
+    />
 
     <section class="meeting-floating-panel">
       <p class="eyebrow">MEETING POINT</p>
@@ -223,7 +283,12 @@ onMounted(loadSavedLocations);
       <div v-if="meetingSearchResult?.places?.length" class="middle-results">
         <h3>Places near the center</h3>
         <ul>
-          <li v-for="place in meetingSearchResult.places" :key="`${place.name}-${place.lat}-${place.lng}`">
+          <li
+            v-for="place in meetingSearchResult.places"
+            :key="place.id || `${place.name}-${place.lat}-${place.lng}`"
+            class="place-item"
+            @click="openPlaceDetails(place)"
+          >
             <div>
               <strong>{{ place.name }}</strong>
               <p class="place-meta">Center: {{ formatDistance(place.centerDistance) }} | Avg user: {{ formatDistance(place.averageDistance) }}</p>
@@ -235,5 +300,15 @@ onMounted(loadSavedLocations);
 
       <p v-else-if="meetingSearchResult && !meetingLoading" class="empty-state">No places found in this radius.</p>
     </aside>
+
+    <PlaceDetailModal
+      :open="isPlaceDetailOpen"
+      :place="selectedPlace"
+      :details="selectedPlaceDetails"
+      :loading="placeDetailLoading"
+      :error="placeDetailError"
+      @close="closePlaceDetails"
+      @copy="copyPlaceLocation"
+    />
   </main>
 </template>
