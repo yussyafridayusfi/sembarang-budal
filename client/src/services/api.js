@@ -1,5 +1,9 @@
 const API_BASE = "/api";
 
+function getFriendlyNetworkError() {
+  return new Error("Cannot reach the backend API. Make sure `npm run dev` is running.");
+}
+
 async function parseResponse(response) {
   const data = await response.json();
 
@@ -10,24 +14,43 @@ async function parseResponse(response) {
   return data;
 }
 
+async function requestJson(url, options) {
+  try {
+    const response = await fetch(url, options);
+    return parseResponse(response);
+  } catch (error) {
+    if (error instanceof TypeError) {
+      throw getFriendlyNetworkError();
+    }
+
+    throw error;
+  }
+}
+
 export async function fetchLocations() {
-  const response = await fetch(`${API_BASE}/locations`);
-  return parseResponse(response);
+  return requestJson(`${API_BASE}/locations`);
 }
 
 export async function searchLocations(query, signal) {
-  const response = await fetch(`${API_BASE}/search?query=${encodeURIComponent(query)}`, { signal });
-  return parseResponse(response);
+  return requestJson(`${API_BASE}/search?query=${encodeURIComponent(query)}`, { signal });
 }
 
 export async function saveLocations(locations) {
-  const response = await fetch(`${API_BASE}/locations`, {
+  return requestJson(`${API_BASE}/locations`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
     },
     body: JSON.stringify({ locations })
   });
+}
 
-  return parseResponse(response);
+export async function findPlacesInMiddle(lat, lng, radius) {
+  const query = new URLSearchParams({
+    lat: String(lat),
+    lng: String(lng),
+    radius: String(radius)
+  });
+
+  return requestJson(`${API_BASE}/places/middle?${query.toString()}`);
 }

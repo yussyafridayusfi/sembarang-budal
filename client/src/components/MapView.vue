@@ -6,18 +6,25 @@ const props = defineProps({
   locations: {
     type: Array,
     default: () => []
+  },
+  middleSearch: {
+    type: Object,
+    default: null
   }
 });
 
 const mapElement = ref(null);
-const mapStatus = ref("Trying to use your current location for the default map view.");
+const mapStatus = ref("Default map view ready.");
 
 let map;
 let locationLayer;
+let middleLayer;
 let pathLine;
 let tracker;
 let trackerInterval;
 let userMarker;
+let midpointMarker;
+let midpointCircle;
 
 function clearTrackerInterval() {
   if (trackerInterval) {
@@ -33,6 +40,10 @@ function clearRoute() {
     locationLayer.clearLayers();
   }
 
+  if (middleLayer) {
+    middleLayer.clearLayers();
+  }
+
   if (pathLine) {
     pathLine.remove();
     pathLine = null;
@@ -42,6 +53,16 @@ function clearRoute() {
     tracker.remove();
     tracker = null;
   }
+
+  if (midpointMarker) {
+    midpointMarker.remove();
+    midpointMarker = null;
+  }
+
+  if (midpointCircle) {
+    midpointCircle.remove();
+    midpointCircle = null;
+  }
 }
 
 function centerToDefaultMapView() {
@@ -49,45 +70,8 @@ function centerToDefaultMapView() {
     return;
   }
 
-  if (!navigator.geolocation) {
-    mapStatus.value = "Showing a default map view because browser geolocation is not available.";
-    map.setView([-2.5, 118], 5);
-    return;
-  }
-
-  navigator.geolocation.getCurrentPosition(
-    (position) => {
-      if (!map || props.locations.length) {
-        return;
-      }
-
-      const userPoint = [position.coords.latitude, position.coords.longitude];
-      mapStatus.value = "Map centered on your current location.";
-      map.setView(userPoint, 13);
-
-      if (userMarker) {
-        userMarker.remove();
-      }
-
-      userMarker = L.circleMarker(userPoint, {
-        radius: 9,
-        color: "#0ea5e9",
-        fillColor: "#38bdf8",
-        fillOpacity: 0.9,
-        weight: 3
-      })
-        .addTo(map)
-        .bindPopup("Your current location");
-    },
-    () => {
-      mapStatus.value = "Location permission was unavailable, so the map is showing a default region.";
-      map.setView([-2.5, 118], 5);
-    },
-    {
-      enableHighAccuracy: true,
-      timeout: 8000
-    }
-  );
+  mapStatus.value = "Showing the default map region.";
+  map.setView([-2.5, 118], 5);
 }
 
 function drawSavedLocations() {
@@ -96,6 +80,11 @@ function drawSavedLocations() {
   }
 
   clearRoute();
+
+  if (props.middleSearch?.midpoint) {
+    drawMiddleSearch();
+    return;
+  }
 
   if (userMarker && props.locations.length) {
     userMarker.remove();
@@ -150,6 +139,52 @@ function drawSavedLocations() {
   }, 1200);
 }
 
+function drawMiddleSearch() {
+  if (!map || !props.middleSearch?.midpoint) {
+    return;
+  }
+
+  const midpoint = [props.middleSearch.midpoint.lat, props.middleSearch.midpoint.lng];
+  const radius = Number(props.middleSearch.radius || 1000);
+  const places = props.middleSearch.places || [];
+
+  middleLayer = L.layerGroup().addTo(map);
+  mapStatus.value = places.length
+    ? `${places.length} place${places.length > 1 ? "s" : ""} found near the midpoint.`
+    : "No nearby places found for this radius.";
+
+  midpointMarker = L.circleMarker(midpoint, {
+    radius: 11,
+    color: "#7c3aed",
+    fillColor: "#a855f7",
+    fillOpacity: 0.95,
+    weight: 3
+  })
+    .addTo(middleLayer)
+    .bindPopup("Midpoint");
+
+  midpointCircle = L.circle(midpoint, {
+    radius,
+    color: "#7c3aed",
+    weight: 2,
+    fillColor: "#c084fc",
+    fillOpacity: 0.12
+  }).addTo(middleLayer);
+
+  places.forEach((place) => {
+    L.marker([place.lat, place.lng])
+      .addTo(middleLayer)
+      .bindPopup(`${place.name} (${place.type})`);
+  });
+
+  const bounds = midpointCircle.getBounds();
+  if (places.length) {
+    places.forEach((place) => bounds.extend([place.lat, place.lng]));
+  }
+
+  map.fitBounds(bounds, { padding: [40, 40] });
+}
+
 onMounted(() => {
   map = L.map(mapElement.value).setView([-2.5, 118], 5);
 
@@ -162,11 +197,11 @@ onMounted(() => {
 });
 
 watch(
-  () => props.locations,
+  () => [props.locations, props.middleSearch],
   () => {
     drawSavedLocations();
   },
-  { deep: true }
+  { deep: true, immediate: false }
 );
 
 onBeforeUnmount(() => {
