@@ -210,12 +210,12 @@ function closePlaceDetails() {
 }
 
 async function copyPlaceLocation(place) {
-  const coordinates = `${place.coordinates?.lat ?? place.lat}, ${place.coordinates?.lng ?? place.lng}`;
+  const address = place.address || place.name || "";
 
   try {
-    await navigator.clipboard.writeText(coordinates);
+    await navigator.clipboard.writeText(address);
   } catch {
-    error.value = "Failed to copy location.";
+    error.value = "Failed to copy address.";
   }
 }
 
