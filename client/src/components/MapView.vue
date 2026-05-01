@@ -10,8 +10,14 @@ const props = defineProps({
   meetingSearch: {
     type: Object,
     default: null
+  },
+  selectedPlace: {
+    type: Object,
+    default: null
   }
 });
+
+const emit = defineEmits(["select-place"]);
 
 const mapElement = ref(null);
 const mapStatus = ref("Default map view ready.");
@@ -118,9 +124,21 @@ function drawMeetingSearch(bounds) {
 
   places.forEach((place) => {
     const markerPoint = [place.lat, place.lng];
-    L.marker(markerPoint)
+    const isSelected = props.selectedPlace && (props.selectedPlace.id || props.selectedPlace.name) === (place.id || place.name);
+    const marker = L.circleMarker(markerPoint, {
+      radius: isSelected ? 10 : 7,
+      color: isSelected ? "#f59e0b" : "#ea580c",
+      fillColor: isSelected ? "#facc15" : "#fb923c",
+      fillOpacity: 0.95,
+      weight: isSelected ? 3 : 2
+    })
       .addTo(meetingLayer)
       .bindPopup(`${place.name} (${place.type})`);
+
+    marker.on("click", () => {
+      emit("select-place", place);
+    });
+
     bounds.extend(markerPoint);
   });
 
@@ -181,7 +199,7 @@ onMounted(() => {
 });
 
 watch(
-  () => [props.locations, props.meetingSearch],
+  () => [props.locations, props.meetingSearch, props.selectedPlace],
   () => {
     drawMap();
   },

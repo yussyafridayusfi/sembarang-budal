@@ -54,3 +54,16 @@ export async function findPlacesNearCenter(lat, lng, radius) {
 
   return requestJson(`${API_BASE}/places/center?${query.toString()}`);
 }
+
+export async function fetchPlaceDetails(place) {
+  const query = new URLSearchParams({
+    lat: String(place.lat),
+    lng: String(place.lng),
+    osmId: String(place.osmId || ""),
+    osmType: String(place.osmType || ""),
+    name: String(place.name || "Place"),
+    type: String(place.type || "place")
+  });
+
+  return requestJson(`${API_BASE}/place/details?${query.toString()}`);
+}
