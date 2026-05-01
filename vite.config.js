@@ -3,6 +3,7 @@ import vue from "@vitejs/plugin-vue";
 
 export default defineConfig({
   root: "client",
+  base: "/sembarang-budal/",
   plugins: [vue()],
   server: {
     host: true,
@@ -12,17 +13,17 @@ export default defineConfig({
       host: "localhost",
       protocol: "ws",
       port: 5173,
-      clientPort: 5173
+      clientPort: 5173,
     },
     proxy: {
       "/api": {
         target: "http://localhost:3000",
-        changeOrigin: true
-      }
-    }
+        changeOrigin: true,
+      },
+    },
   },
   build: {
     outDir: "../dist",
-    emptyOutDir: true
-  }
+    emptyOutDir: true,
+  },
 });
