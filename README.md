@@ -25,6 +25,10 @@ npm run dev
    - Output directory: `dist`
    - API routes served by `api/index.js`
 4. Add environment variable in Vercel project settings:
-   - `GOOGLE_PLACES_API_KEY` (optional, for Google Places images/reviews)
+   - `GOOGLE_PLACES_API_KEY` (optional, only for richer photos/reviews)
+
+By default (without API key), this app runs on free/open APIs:
+- Nominatim (search and geocoding)
+- Overpass (nearby places)
 
 After deployment, Vercel will provide a public URL you can share.

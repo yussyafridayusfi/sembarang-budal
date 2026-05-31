@@ -37,6 +37,42 @@ async function searchNominatim(query, limit = 1) {
   return response.json();
 }
 
+function normalizePlaceType(item = {}) {
+  const classValue = String(item.class || "").toLowerCase();
+  const typeValue = String(item.type || "").toLowerCase();
+
+  if (classValue === "amenity") {
+    return typeValue || "place";
+  }
+
+  if (classValue === "tourism") {
+    return typeValue || "attraction";
+  }
+
+  if (classValue === "leisure") {
+    return typeValue || "leisure";
+  }
+
+  if (classValue === "shop") {
+    return "shop";
+  }
+
+  return typeValue || "place";
+}
+
+function dedupeByKey(items, keyFn) {
+  const map = new Map();
+
+  items.forEach((item) => {
+    const key = keyFn(item);
+    if (!map.has(key)) {
+      map.set(key, item);
+    }
+  });
+
+  return Array.from(map.values());
+}
+
 async function reverseGeocode(lat, lng) {
   const params = new URLSearchParams({
     format: "jsonv2",
@@ -409,7 +445,7 @@ function normalizePlaceFromOverpass(item, centerLat, centerLng) {
     return null;
   }
 
-  const type = item.tags?.amenity || "place";
+  const type = item.tags?.amenity || item.tags?.tourism || item.tags?.leisure || item.tags?.shop || "place";
   const name = item.tags?.name || item.tags?.brand || type;
 
   return {
@@ -426,7 +462,9 @@ function normalizePlaceFromOverpass(item, centerLat, centerLng) {
 }
 
 async function geocodeLocation(query) {
-  const results = (await searchNominatim(query, 5)).filter(isIndonesianResult);
+  const results = (await searchNominatim(query, 15))
+    .filter(isIndonesianResult)
+    .sort((a, b) => Number(b.importance || 0) - Number(a.importance || 0));
 
   if (!results.length) {
     throw new Error(`Only Indonesian addresses are allowed: ${query}`);
@@ -452,15 +490,48 @@ router.get("/search", async (req, res) => {
   }
 
   try {
-    const results = (await searchNominatim(query, 5)).filter(isIndonesianResult);
+    const results = (await searchNominatim(query, 25)).filter(isIndonesianResult);
 
-    return res.json({
-      suggestions: results.map((item) => ({
+    const enriched = results.map((item) => {
+      const lat = Number(item.lat);
+      const lng = Number(item.lon);
+      const type = normalizePlaceType(item);
+      const importance = Number(item.importance || 0);
+
+      return {
         name: item.name || query,
         displayName: item.display_name,
-        lat: Number(item.lat),
-        lng: Number(item.lon)
-      }))
+        lat,
+        lng,
+        osmId: item.osm_id || "",
+        osmType: item.osm_type || "",
+        type,
+        category: item.class || "",
+        importance
+      };
+    });
+
+    const filtered = enriched
+      .filter((item) => Number.isFinite(item.lat) && Number.isFinite(item.lng))
+      .filter((item) => {
+        return ["amenity", "tourism", "leisure", "shop", "building", "highway", "place"].includes(item.category);
+      });
+
+    const unique = dedupeByKey(filtered, (item) => `${item.displayName}-${item.lat}-${item.lng}`)
+      .sort((a, b) => b.importance - a.importance)
+      .slice(0, 12)
+      .map((item) => ({
+        name: item.name,
+        displayName: item.displayName,
+        lat: item.lat,
+        lng: item.lng,
+        osmId: item.osmId,
+        osmType: item.osmType,
+        type: item.type
+      }));
+
+    return res.json({
+      suggestions: unique
     });
   } catch (error) {
     return res.status(500).json({ error: error.message || "Failed to search locations." });
@@ -520,6 +591,18 @@ async function handleCenterPlacesRequest(req, res) {
       node["amenity"~"cafe|restaurant|fast_food"](around:${radius},${lat},${lng});
       way["amenity"~"cafe|restaurant|fast_food"](around:${radius},${lat},${lng});
       relation["amenity"~"cafe|restaurant|fast_food"](around:${radius},${lat},${lng});
+      node["amenity"~"food_court|ice_cream|bar|pub"](around:${radius},${lat},${lng});
+      way["amenity"~"food_court|ice_cream|bar|pub"](around:${radius},${lat},${lng});
+      relation["amenity"~"food_court|ice_cream|bar|pub"](around:${radius},${lat},${lng});
+      node["tourism"~"attraction|museum|gallery|zoo|theme_park|viewpoint|aquarium"](around:${radius},${lat},${lng});
+      way["tourism"~"attraction|museum|gallery|zoo|theme_park|viewpoint|aquarium"](around:${radius},${lat},${lng});
+      relation["tourism"~"attraction|museum|gallery|zoo|theme_park|viewpoint|aquarium"](around:${radius},${lat},${lng});
+      node["leisure"~"park|garden|nature_reserve|water_park"](around:${radius},${lat},${lng});
+      way["leisure"~"park|garden|nature_reserve|water_park"](around:${radius},${lat},${lng});
+      relation["leisure"~"park|garden|nature_reserve|water_park"](around:${radius},${lat},${lng});
+      node["shop"](around:${radius},${lat},${lng});
+      way["shop"](around:${radius},${lat},${lng});
+      relation["shop"](around:${radius},${lat},${lng});
     );
     out center tags;
   `;
