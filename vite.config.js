@@ -3,7 +3,7 @@ import vue from "@vitejs/plugin-vue";
 
 export default defineConfig({
   root: "client",
-  base: "/sembarang-budal/",
+  base: process.env.GITHUB_ACTIONS === "true" ? "/sembarang-budal/" : "/",
   plugins: [vue()],
   server: {
     host: true,
@@ -23,7 +23,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: "../docs",
+    outDir: "../dist",
     emptyOutDir: true,
   },
 });
