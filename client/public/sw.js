@@ -1,67 +1,118 @@
-const CACHE_NAME = "sembarang-budal-v2";
-const APP_SHELL = ["/", "/manifest.json", "/icon-192.svg", "/icon-512.svg"];
+/**
+ * Offline shell for the app.
+ *
+ * The important rule: the HTML document must be fetched network-first.
+ * index.html names the hashed build assets, so serving a cached copy of it
+ * after a new deploy points the browser at asset filenames that no longer
+ * exist - which renders as a blank page with no console error. Hashed assets
+ * under /assets/ are safe to serve cache-first, because their names change
+ * whenever their contents do.
+ */
+const VERSION = "v3";
+const SHELL_CACHE = `sembarang-budal-shell-${VERSION}`;
+const ASSET_CACHE = `sembarang-budal-assets-${VERSION}`;
+const CURRENT_CACHES = [SHELL_CACHE, ASSET_CACHE];
 
-function shouldHandleRequest(request) {
-  const url = new URL(request.url);
-
-  if (request.method !== "GET") {
-    return false;
-  }
-
-  if (url.origin !== self.location.origin) {
-    return false;
-  }
-
-  if (url.pathname.startsWith("/api")) {
-    return false;
-  }
-
-  return true;
-}
+const SHELL_URLS = ["/", "/manifest.json", "/icon-192.svg", "/icon-512.svg"];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)));
-  self.skipWaiting();
+  event.waitUntil(
+    caches
+      .open(SHELL_CACHE)
+      // A failed precache must not abort the install, or the worker never
+      // activates and the app has no offline fallback at all.
+      .then((cache) => Promise.allSettled(SHELL_URLS.map((url) => cache.add(url))))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(
-        keys.map((key) => {
-          if (key !== CACHE_NAME) {
-            return caches.delete(key);
-          }
-          return Promise.resolve();
-        })
+    caches
+      .keys()
+      .then((keys) =>
+        Promise.all(keys.filter((key) => !CURRENT_CACHES.includes(key)).map((key) => caches.delete(key)))
       )
-    )
+      .then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
+function isHashedAsset(url) {
+  return url.pathname.startsWith("/assets/");
+}
+
+/** Cache-first: the filename encodes the content, so a hit is always correct. */
+async function assetFirst(request) {
+  const cache = await caches.open(ASSET_CACHE);
+  const cached = await cache.match(request);
+
+  if (cached) {
+    return cached;
+  }
+
+  const response = await fetch(request);
+
+  if (response.ok) {
+    cache.put(request, response.clone());
+  }
+
+  return response;
+}
+
+/** Network-first with a cached fallback, for HTML and other static files. */
+async function networkFirst(request, cacheName, fallbackUrl) {
+  const cache = await caches.open(cacheName);
+
+  try {
+    const response = await fetch(request);
+
+    if (response.ok) {
+      cache.put(request, response.clone());
+    }
+
+    return response;
+  } catch (error) {
+    const cached = await cache.match(request);
+
+    if (cached) {
+      return cached;
+    }
+
+    if (fallbackUrl) {
+      const fallback = await cache.match(fallbackUrl);
+
+      if (fallback) {
+        return fallback;
+      }
+    }
+
+    throw error;
+  }
+}
+
 self.addEventListener("fetch", (event) => {
-  if (!shouldHandleRequest(event.request)) {
+  const { request } = event;
+  const url = new URL(request.url);
+
+  if (request.method !== "GET" || url.origin !== self.location.origin) {
     return;
   }
 
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) {
-        return cached;
-      }
+  // API responses are never cached - a stale place list is worse than none.
+  if (url.pathname.startsWith("/api")) {
+    return;
+  }
 
-      return fetch(event.request, { cache: "no-cache" })
-        .then((response) => {
-          if (!response.ok) {
-            return response;
-          }
+  if (isHashedAsset(url)) {
+    event.respondWith(assetFirst(request));
+    return;
+  }
 
-          const responseClone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseClone));
-          return response;
-        })
-        .catch(() => caches.match("/"));
-    })
-  );
+  // Navigations fall back to the cached shell so the app still opens offline.
+  if (request.mode === "navigate") {
+    event.respondWith(networkFirst(request, SHELL_CACHE, "/"));
+    return;
+  }
+
+  event.respondWith(networkFirst(request, SHELL_CACHE));
 });
