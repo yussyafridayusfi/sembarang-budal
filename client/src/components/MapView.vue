@@ -3,220 +3,265 @@ import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import L from "leaflet";
 
 const props = defineProps({
-  locations: {
-    type: Array,
-    default: () => []
-  },
-  meetingSearch: {
-    type: Object,
-    default: null
-  },
-  selectedPlace: {
-    type: Object,
-    default: null
-  }
+  center: { type: Object, default: null },
+  radius: { type: Number, default: 2000 },
+  places: { type: Array, default: () => [] },
+  routeLocations: { type: Array, default: () => [] },
+  selectedPlaceId: { type: String, default: "" },
+  hoveredPlaceId: { type: String, default: "" }
 });
 
-const emit = defineEmits(["select-place"]);
+const emit = defineEmits(["select-place", "pick-center", "area-changed"]);
 
 const mapElement = ref(null);
-const mapStatus = ref("Default map view ready.");
+const moved = ref(false);
 
-let map;
-let locationLayer;
-let meetingLayer;
-let pathLine;
+let map = null;
+let circleLayer = null;
+let centerMarker = null;
+let placeLayer = null;
+let routeLayer = null;
+const markersByPlaceId = new Map();
 
-function clearLayers() {
-  if (locationLayer) {
-    locationLayer.clearLayers();
-  }
+/** Category colours, kept in step with the chip colours in styles.css. */
+const CATEGORY_COLORS = {
+  food: "#e8590c",
+  cafe: "#b8860b",
+  nightlife: "#9333ea",
+  shopping: "#0891b2",
+  attraction: "#d6336c",
+  outdoor: "#2f9e44",
+  entertainment: "#7048e8",
+  stay: "#1971c2",
+  worship: "#5f3dc4",
+  essential: "#e03131",
+  transport: "#495057",
+  education: "#1098ad",
+  other: "#868e96"
+};
 
-  if (meetingLayer) {
-    meetingLayer.clearLayers();
-  }
-
-  if (pathLine) {
-    pathLine.remove();
-    pathLine = null;
-  }
+function colorFor(categoryId) {
+  return CATEGORY_COLORS[categoryId] || CATEGORY_COLORS.other;
 }
 
-function centerToDefaultMapView() {
-  if (!map) {
+function fitToRadius() {
+  if (!map || !props.center) {
     return;
   }
 
-  mapStatus.value = "Showing the default map region.";
-  map.setView([-2.5, 118], 5);
+  const bounds = L.latLng(props.center.lat, props.center.lng).toBounds(props.radius * 2.2);
+  map.fitBounds(bounds, { padding: [24, 24], animate: false });
 }
 
-function drawSavedRoute(points) {
-  if (points.length < 2) {
+function drawCenter() {
+  if (!map || !props.center) {
     return;
   }
 
-  pathLine = L.polyline(points, {
-    color: "#2563eb",
-    weight: 4,
-    opacity: 0.8,
-    dashArray: "8 8"
-  }).addTo(map);
-}
+  const point = [props.center.lat, props.center.lng];
 
-function drawMeetingSearch(bounds) {
-  if (!props.meetingSearch?.center) {
-    return;
-  }
-
-  const center = props.meetingSearch.center;
-  const centerPoint = [center.lat, center.lng];
-  const places = props.meetingSearch.places || [];
-  const radius = Number(props.meetingSearch.radius || 1000);
-
-  L.circleMarker(centerPoint, {
-    radius: 11,
-    color: "#7c3aed",
-    fillColor: "#a855f7",
-    fillOpacity: 0.95,
-    weight: 3
-  })
-    .addTo(meetingLayer)
-    .bindPopup("Central meeting point");
-
-  const radiusCircle = L.circle(centerPoint, {
-    radius,
-    color: "#7c3aed",
-    weight: 2,
-    fillColor: "#c084fc",
-    fillOpacity: 0.12
-  }).addTo(meetingLayer);
-
-  bounds.extend(radiusCircle.getBounds());
-
-  props.locations.forEach((location) => {
-    const line = L.polyline(
-      [
-        [location.lat, location.lng],
-        centerPoint
-      ],
-      {
-        color: "#7c3aed",
-        weight: 2,
-        opacity: 0.65
-      }
-    );
-
-    line.addTo(meetingLayer);
-  });
-
-  if (props.locations.length >= 3) {
-    L.polygon(
-      props.locations.map((location) => [location.lat, location.lng]),
-      {
-        color: "#0f766e",
-        weight: 2,
-        fillColor: "#5eead4",
-        fillOpacity: 0.08
-      }
-    ).addTo(meetingLayer);
-  }
-
-  places.forEach((place) => {
-    const markerPoint = [place.lat, place.lng];
-    const isSelected = props.selectedPlace && (props.selectedPlace.id || props.selectedPlace.name) === (place.id || place.name);
-    const marker = L.circleMarker(markerPoint, {
-      radius: isSelected ? 10 : 7,
-      color: isSelected ? "#f59e0b" : "#ea580c",
-      fillColor: isSelected ? "#facc15" : "#fb923c",
-      fillOpacity: 0.95,
-      weight: isSelected ? 3 : 2
-    })
-      .addTo(meetingLayer)
-      .bindPopup(`${place.name} (${place.type})`);
-
-    marker.on("click", () => {
-      emit("select-place", place);
-    });
-
-    bounds.extend(markerPoint);
-  });
-
-  mapStatus.value = places.length
-    ? `${places.length} place${places.length > 1 ? "s" : ""} found near the meeting point.`
-    : "Meeting point calculated. No places found in the selected radius.";
-}
-
-function drawMap() {
-  if (!map) {
-    return;
-  }
-
-  clearLayers();
-
-  if (!props.locations.length) {
-    centerToDefaultMapView();
-    return;
-  }
-
-  locationLayer = L.layerGroup().addTo(map);
-  meetingLayer = L.layerGroup().addTo(map);
-
-  const points = props.locations.map((location) => [location.lat, location.lng]);
-  const bounds = L.latLngBounds(points);
-
-  props.locations.forEach((location, index) => {
-    L.circleMarker([location.lat, location.lng], {
-      radius: 8,
-      color: "#1d4ed8",
-      fillColor: "#60a5fa",
-      fillOpacity: 0.9,
-      weight: 2
-    })
-      .addTo(locationLayer)
-      .bindPopup(`${index + 1}. ${location.displayName || location.name}`);
-  });
-
-  if (props.meetingSearch?.center) {
-    drawMeetingSearch(bounds);
+  if (circleLayer) {
+    circleLayer.setLatLng(point).setRadius(props.radius);
   } else {
-    drawSavedRoute(points);
-    mapStatus.value = `${props.locations.length} saved location${props.locations.length > 1 ? "s" : ""} on the map.`;
+    circleLayer = L.circle(point, {
+      radius: props.radius,
+      color: "#1971c2",
+      weight: 2,
+      fillColor: "#4dabf7",
+      fillOpacity: 0.1,
+      interactive: false
+    }).addTo(map);
   }
 
-  map.fitBounds(bounds, { padding: [40, 40] });
+  if (centerMarker) {
+    centerMarker.setLatLng(point);
+  } else {
+    centerMarker = L.circleMarker(point, {
+      radius: 8,
+      color: "#ffffff",
+      weight: 3,
+      fillColor: "#1971c2",
+      fillOpacity: 1
+    })
+      .addTo(map)
+      .bindTooltip("Search centre", { direction: "top" });
+  }
+}
+
+function drawRoute() {
+  if (!map) {
+    return;
+  }
+
+  if (routeLayer) {
+    routeLayer.clearLayers();
+  } else {
+    routeLayer = L.layerGroup().addTo(map);
+  }
+
+  const points = props.routeLocations
+    .filter((location) => Number.isFinite(location.lat) && Number.isFinite(location.lng))
+    .map((location) => [location.lat, location.lng]);
+
+  if (!points.length) {
+    return;
+  }
+
+  props.routeLocations.forEach((location, index) => {
+    if (!Number.isFinite(location.lat)) {
+      return;
+    }
+
+    L.marker([location.lat, location.lng], {
+      icon: L.divIcon({
+        className: "route-pin",
+        html: `<span>${index + 1}</span>`,
+        iconSize: [26, 26],
+        iconAnchor: [13, 13]
+      })
+    })
+      .addTo(routeLayer)
+      .bindTooltip(location.displayName || location.name, { direction: "top" });
+  });
+
+  if (points.length >= 2) {
+    L.polyline(points, {
+      color: "#1971c2",
+      weight: 2,
+      opacity: 0.6,
+      dashArray: "6 6"
+    }).addTo(routeLayer);
+  }
+}
+
+function drawPlaces() {
+  if (!map) {
+    return;
+  }
+
+  if (placeLayer) {
+    placeLayer.clearLayers();
+  } else {
+    placeLayer = L.layerGroup().addTo(map);
+  }
+
+  markersByPlaceId.clear();
+
+  props.places.forEach((place) => {
+    const isSelected = place.id === props.selectedPlaceId;
+    const isHovered = place.id === props.hoveredPlaceId;
+    const color = colorFor(place.categoryId);
+
+    const marker = L.circleMarker([place.lat, place.lng], {
+      radius: isSelected ? 11 : isHovered ? 9 : 6,
+      color: isSelected || isHovered ? "#212529" : "#ffffff",
+      weight: isSelected || isHovered ? 3 : 1.5,
+      fillColor: color,
+      fillOpacity: 0.95
+    })
+      .addTo(placeLayer)
+      .bindTooltip(place.name, { direction: "top" });
+
+    marker.on("click", () => emit("select-place", place));
+    markersByPlaceId.set(place.id, marker);
+  });
+}
+
+function redraw() {
+  drawCenter();
+  drawRoute();
+  drawPlaces();
 }
 
 onMounted(() => {
-  map = L.map(mapElement.value).setView([-2.5, 118], 5);
+  map = L.map(mapElement.value, {
+    zoomControl: true,
+    // Indonesia by default; replaced as soon as a centre is chosen.
+    center: [-2.5, 118],
+    zoom: 5
+  });
 
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
   }).addTo(map);
 
-  drawMap();
+  // Clicking the map moves the search centre, the way a maps app behaves.
+  map.on("click", (event) => {
+    emit("pick-center", { lat: event.latlng.lat, lng: event.latlng.lng });
+  });
+
+  // Panning does not trigger a search on its own; the user confirms it, so a
+  // stray drag never spends a request.
+  map.on("moveend", () => {
+    if (!props.center) {
+      return;
+    }
+
+    const mapCenter = map.getCenter();
+    const drift = mapCenter.distanceTo(L.latLng(props.center.lat, props.center.lng));
+    moved.value = drift > props.radius * 0.25;
+  });
+
+  redraw();
+
+  if (props.center) {
+    fitToRadius();
+  }
 });
 
 watch(
-  () => [props.locations, props.meetingSearch, props.selectedPlace],
+  () => [props.center, props.radius],
   () => {
-    drawMap();
+    drawCenter();
+    fitToRadius();
+    moved.value = false;
   },
   { deep: true }
 );
 
+watch(() => props.places, drawPlaces, { deep: true });
+watch(() => [props.selectedPlaceId, props.hoveredPlaceId], drawPlaces);
+watch(() => props.routeLocations, drawRoute, { deep: true });
+
+watch(
+  () => props.selectedPlaceId,
+  (id) => {
+    const marker = markersByPlaceId.get(id);
+
+    if (marker && map) {
+      map.panTo(marker.getLatLng(), { animate: true });
+      marker.openTooltip();
+    }
+  }
+);
+
+function searchThisArea() {
+  if (!map) {
+    return;
+  }
+
+  const mapCenter = map.getCenter();
+  moved.value = false;
+  emit("area-changed", { lat: mapCenter.lat, lng: mapCenter.lng });
+}
+
 onBeforeUnmount(() => {
-  clearLayers();
   if (map) {
     map.remove();
+    map = null;
   }
 });
 </script>
 
 <template>
-  <div>
-    <div ref="mapElement" class="map"></div>
-    <p class="map-status">{{ mapStatus }}</p>
+  <div class="map-wrap">
+    <div ref="mapElement" class="map" aria-label="Map of places"></div>
+
+    <button v-if="moved" type="button" class="search-area-btn" @click="searchThisArea">
+      Search this area
+    </button>
+
+    <p class="map-hint">Click anywhere on the map to move the search centre.</p>
   </div>
 </template>

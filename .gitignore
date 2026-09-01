@@ -141,3 +141,8 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Local place cache built by scripts/ingest.js
+data/*.db
+data/*.db-*
+data/places.json

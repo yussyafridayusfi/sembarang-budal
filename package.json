@@ -9,7 +9,9 @@
     "dev:client": "vite --config vite.config.js",
     "build": "vite build --config vite.config.js",
     "preview": "vite preview --config vite.config.js",
-    "start": "node server/index.js"
+    "start": "node server/index.js",
+    "ingest": "node scripts/ingest.js",
+    "stats": "node -e \"import('./server/lib/db.js').then(m=>console.log(JSON.stringify(m.getStore().stats(),null,2)))\""
   },
   "dependencies": {
     "dotenv": "^17.4.2",
