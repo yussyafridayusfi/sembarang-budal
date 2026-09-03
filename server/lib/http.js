@@ -57,7 +57,10 @@ export async function fetchJson(url, options = {}) {
  * Retry on transient upstream failures only (timeouts, 429, 5xx). Overpass in
  * particular answers 429/504 under load and succeeds on a later attempt.
  */
-export async function fetchJsonWithRetry(url, { attempts = 2, backoffMs = 600, ...options } = {}) {
+export async function fetchJsonWithRetry(
+  url,
+  { attempts = 2, backoffMs = 600, retryTimeouts = true, ...options } = {}
+) {
   let lastError;
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
@@ -66,7 +69,11 @@ export async function fetchJsonWithRetry(url, { attempts = 2, backoffMs = 600, .
     } catch (error) {
       lastError = error;
       const status = error.status || 0;
-      const retryable = error.name === "AbortError" || status === 429 || status >= 500;
+      const timedOut = error.name === "AbortError";
+      // Callers working against a shared deadline pass `retryTimeouts: false`:
+      // re-running a request that already used its whole timeout spends budget
+      // the remaining work needs, whereas a 429/503 usually succeeds at once.
+      const retryable = timedOut ? retryTimeouts : status === 429 || status >= 500;
 
       if (!retryable || attempt === attempts - 1) {
         break;

@@ -21,6 +21,10 @@ const error = ref("");
 const failed = ref([]);
 
 const suggestionsByRow = ref({});
+/** Per row: how a pasted Google link was read, and whether it found anything. */
+const linkByRow = ref({});
+/** Per row: the area used when the linked place itself is not on the map. */
+const areaByRow = ref({});
 const searchingByRow = ref({});
 const openRow = ref(-1);
 
@@ -66,6 +70,8 @@ function scheduleSuggest(index, value) {
 
   if (query.length < 2) {
     suggestionsByRow.value = { ...suggestionsByRow.value, [index]: [] };
+    linkByRow.value = { ...linkByRow.value, [index]: null };
+    areaByRow.value = { ...areaByRow.value, [index]: "" };
     searchingByRow.value = { ...searchingByRow.value, [index]: false };
     return;
   }
@@ -80,11 +86,22 @@ function scheduleSuggest(index, value) {
       controllers.set(index, controller);
 
       try {
-        const response = await searchLocations(query, controller.signal);
+        // Bias towards a location already pinned on another row, then the map
+        // centre. A Google share link often carries only a bare name, and the
+        // other end of the same trip is the best hint we have about which one.
+        const anchor =
+          rows.value.find((other, otherIndex) => otherIndex !== index && other.lat !== null) ||
+          props.center;
+
+        const response = await searchLocations(query, controller.signal, anchor);
         suggestionsByRow.value = { ...suggestionsByRow.value, [index]: response.suggestions || [] };
+        linkByRow.value = { ...linkByRow.value, [index]: response.link || null };
+        areaByRow.value = { ...areaByRow.value, [index]: response.approximateArea || "" };
       } catch (err) {
         if (err.name !== "AbortError") {
           suggestionsByRow.value = { ...suggestionsByRow.value, [index]: [] };
+          linkByRow.value = { ...linkByRow.value, [index]: null };
+          areaByRow.value = { ...areaByRow.value, [index]: "" };
         }
       } finally {
         searchingByRow.value = { ...searchingByRow.value, [index]: false };
@@ -108,6 +125,8 @@ function pickSuggestion(index, suggestion) {
   };
 
   suggestionsByRow.value = { ...suggestionsByRow.value, [index]: [] };
+  linkByRow.value = { ...linkByRow.value, [index]: null };
+  areaByRow.value = { ...areaByRow.value, [index]: "" };
   openRow.value = -1;
 }
 
@@ -184,7 +203,7 @@ function formatRadius(metres) {
         <div class="combo">
           <input
             type="text"
-            :placeholder="`Location ${index + 1}`"
+            :placeholder="`Location ${index + 1} — name, address, Maps link, or lat,lng`"
             autocomplete="off"
             :value="row.name"
             @input="onInput(index, $event)"
@@ -194,8 +213,42 @@ function formatRadius(metres) {
 
           <span v-if="row.lat !== null" class="row-pinned" title="Coordinates locked from your pick">pinned</span>
 
-          <ul v-if="openRow === index && (suggestionsByRow[index]?.length || searchingByRow[index])" class="combo-list">
+          <ul
+            v-if="
+              openRow === index &&
+              (suggestionsByRow[index]?.length || searchingByRow[index] || linkByRow[index])
+            "
+            class="combo-list"
+          >
             <li v-if="searchingByRow[index]" class="combo-status">Searching…</li>
+            <li
+              v-else-if="!suggestionsByRow[index]?.length && linkByRow[index]"
+              class="combo-status combo-error"
+            >
+              <span class="combo-note-title">Not on the map: “{{ linkByRow[index].name }}”</span>
+              <span class="combo-note-body">
+                That link carries only a name. Share from Google Maps for the exact position, or
+                click the map to place the point.
+              </span>
+            </li>
+            <li v-else-if="areaByRow[index]" class="combo-status combo-relaxed">
+              <span class="combo-note-title">
+                “{{ linkByRow[index]?.name }}” is not on the map
+              </span>
+              <span class="combo-note-body">
+                Showing {{ areaByRow[index] }}, the area named in the link. Drop a pin on the map
+                if you need the exact spot.
+              </span>
+            </li>
+            <li
+              v-else-if="linkByRow[index] && linkByRow[index].kind === 'name'"
+              class="combo-status combo-relaxed"
+            >
+              <span class="combo-note-title">Link gave a name, not a position</span>
+              <span class="combo-note-body">
+                Looked up “{{ linkByRow[index].name }}” — check the match below is the right one.
+              </span>
+            </li>
             <li v-for="suggestion in suggestionsByRow[index] || []" :key="`${suggestion.osmType}${suggestion.osmId}${suggestion.lat}`">
               <button type="button" @mousedown.prevent="pickSuggestion(index, suggestion)">
                 <strong>{{ suggestion.name }}</strong>

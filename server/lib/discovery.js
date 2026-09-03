@@ -2,8 +2,8 @@ import { getStore } from "./db.js";
 import { boundingBox, haversineDistanceMeters, splitBoundingBox, tileKeysForBox } from "./geo.js";
 import { createDeadline } from "./http.js";
 import { fetchOverpassPlaces } from "./sources/overpass.js";
-import { fetchNominatimPlaces, planTagJobs, searchPlaces } from "./sources/nominatim.js";
-import { categoryIdForTag } from "./categories.js";
+import { fetchNominatimPlaces, planTagJobs } from "./sources/nominatim.js";
+import { fetchPhotonPlaces, searchPhoton } from "./sources/photon.js";
 
 /**
  * How long a cached area stays trusted before we re-scrape it. POI data moves
@@ -15,11 +15,36 @@ const COVERAGE_MAX_AGE_MS = Number(process.env.COVERAGE_MAX_AGE_MS || 7 * 24 * 6
 const COVERAGE_THRESHOLD = 0.85;
 
 /**
- * Tags per category queried on the request path. Two is enough to cover the
- * defining tags (amenity=restaurant/fast_food, shop=mall/department_store) and
- * keeps a five-category search inside the budget.
+ * How long an area rests after a live fetch before it may be fetched again.
+ *
+ * Coverage does not always reach the threshold: a category that genuinely caps
+ * everywhere, or an upstream having a bad day, leaves it short for as long as
+ * that lasts. Without this, such an area re-fetched on *every single request* -
+ * a dozen upstream calls per page load, which is both pointless (the results
+ * were already cached and identical) and the fastest way to get the app blocked
+ * by a free public API. Verified: it got us a connection-level block from
+ * photon.komoot.io inside a few minutes.
  */
-const FOREGROUND_TAGS_PER_CATEGORY = 2;
+const LIVE_FETCH_COOLDOWN_MS = Number(process.env.LIVE_FETCH_COOLDOWN_MS || 10 * 60 * 1000);
+
+/** areaKey -> last live fetch. Per process, which is the right scope: it exists
+ * to stop one instance hammering an upstream, not to be a shared truth. */
+const lastLiveFetchAt = new Map();
+
+function noteLiveFetch(areaKey) {
+  // Bound the map so a long-running instance browsing many areas cannot grow it
+  // without limit.
+  if (lastLiveFetchAt.size > 500) {
+    lastLiveFetchAt.clear();
+  }
+
+  lastLiveFetchAt.set(areaKey, Date.now());
+}
+
+function isCoolingDown(areaKey) {
+  const last = lastLiveFetchAt.get(areaKey);
+  return Boolean(last) && Date.now() - last < LIVE_FETCH_COOLDOWN_MS;
+}
 
 const IS_SERVERLESS = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
 
@@ -172,49 +197,37 @@ function scheduleBackgroundIngest({ lat, lng, radius, categoryIds, areaKey }) {
   return true;
 }
 
-/** Extra bounded free-text pass, used when the user typed something specific. */
+/**
+ * Extra bounded free-text pass, used when the user typed something specific.
+ * Runs on Photon so it does not queue behind the browse requests - on
+ * Nominatim it shared the one-request-per-second queue and usually never ran.
+ */
 async function fetchTextMatches(query, box, deadline) {
   if (!query || deadline.remaining() < 2500) {
     return [];
   }
 
   try {
-    const results = await searchPlaces(query, {
-      limit: 40,
+    const results = await searchPhoton(query, {
+      limit: 50,
       timeoutMs: deadline.budget(5000),
       viewbox: box
     });
 
-    return results
-      .map((item) => {
-        const lat = Number(item.lat);
-        const lng = Number(item.lon);
-        const tagKey = item.category || item.class;
-        const tagValue = item.type;
-        const name = item.name || item.display_name?.split(",")[0];
-
-        if (!Number.isFinite(lat) || !Number.isFinite(lng) || !tagKey || !tagValue || !name) {
-          return null;
-        }
-
-        const osmType = String(item.osm_type || "node");
-
-        return {
-          id: item.osm_id ? `${osmType}/${item.osm_id}` : `nominatim/${lat.toFixed(6)},${lng.toFixed(6)}`,
-          osmType,
-          osmId: item.osm_id,
-          name: String(name),
-          lat,
-          lng,
-          categoryId: categoryIdForTag(tagKey, tagValue),
-          tagKey,
-          tagValue,
-          tags: { [tagKey]: tagValue },
-          address: item.display_name || "",
-          source: "nominatim-text"
-        };
-      })
-      .filter(Boolean);
+    return results.map((item) => ({
+      id: item.osmId ? `${item.osmType}/${item.osmId}` : `photon/${item.lat.toFixed(6)},${item.lng.toFixed(6)}`,
+      osmType: item.osmType,
+      osmId: item.osmId,
+      name: item.name,
+      lat: item.lat,
+      lng: item.lng,
+      categoryId: item.categoryId,
+      tagKey: item.category,
+      tagValue: item.type,
+      tags: item.category && item.type ? { [item.category]: item.type } : {},
+      address: item.displayName || "",
+      source: "photon-text"
+    }));
   } catch (error) {
     console.warn(`[discovery] text search failed: ${error.message}`);
     return [];
@@ -261,41 +274,76 @@ export async function discoverPlaces({
 
   let places = cached;
 
-  const needsLiveFetch = refresh || coverage < COVERAGE_THRESHOLD;
+  // An explicit refresh always fetches. Otherwise a thin area is fetched unless
+  // it was just fetched and we already have something to show for it.
+  const cooling = isCoolingDown(areaKey);
+  const needsLiveFetch = refresh || (coverage < COVERAGE_THRESHOLD && !(cooling && cached.length));
+
+  diagnostics.cooling = cooling;
 
   if (needsLiveFetch) {
     diagnostics.liveFetch = true;
+    noteLiveFetch(areaKey);
     const deadline = createDeadline(budgetMs);
 
-    // Nominatim only on the request path. Overpass returns far richer data but
-    // measured 13s+ per category against the public mirrors and often 504s, so
-    // it would spend the whole budget and contribute nothing; it runs in the
-    // background ingest instead, where slowness is free.
-    const [nominatimResult, textResult] = await Promise.all([
-      fetchNominatimPlaces({
-        jobs: planTagJobs(categoryIds, [box], { maxTagsPerCategory: FOREGROUND_TAGS_PER_CATEGORY }),
-        deadline
-      }).catch((error) => ({
+    // Photon only on the request path: one request per category, answered
+    // concurrently, so all twelve fit in the budget. Nominatim needed one
+    // rate-limited request per tag *value* - 40+ serialised requests against a
+    // 14 s budget - so it only ever reached a handful, which is why most
+    // categories came back empty. Overpass is richer still but measured 13s+
+    // per category and often 504s. Both now run in the background ingest
+    // instead, where slowness is free.
+    const [photonResult, textResult] = await Promise.all([
+      fetchPhotonPlaces({ lat, lng, radius, categoryIds, deadline }).catch((error) => ({
         places: [],
-        failures: [{ tag: "nominatim", reason: error.message }],
-        pending: [],
+        failures: [{ tag: "photon", reason: error.message }],
+        capped: 0,
+        completed: 0,
+        requests: 0,
         coveredCategoryIds: []
       })),
       fetchTextMatches(needle, box, deadline)
     ]);
 
-    const live = mergePlaces([nominatimResult.places, textResult]);
+    const live = mergePlaces([photonResult.places, textResult]);
 
-    if (nominatimResult.places.length) {
-      diagnostics.sources.push({ source: "nominatim", count: nominatimResult.places.length });
+    if (photonResult.places.length) {
+      diagnostics.sources.push({ source: "photon", count: photonResult.places.length });
     }
 
     if (textResult.length) {
-      diagnostics.sources.push({ source: "nominatim-text", count: textResult.length });
+      diagnostics.sources.push({ source: "photon-text", count: textResult.length });
     }
 
-    diagnostics.failures = nominatimResult.failures || [];
-    diagnostics.pendingJobs = (nominatimResult.pending || []).length;
+    diagnostics.failures = photonResult.failures || [];
+    diagnostics.cappedTiles = photonResult.capped || 0;
+    diagnostics.completedJobs = `${photonResult.completed}/${photonResult.requests}`;
+
+    let covered = photonResult.coveredCategoryIds || [];
+
+    // If Photon gave us nothing at all and failed doing it, it is down, blocked
+    // or rate-limiting us. Fall back to Nominatim for whatever budget is left:
+    // it is far slower (one rate-limited request per tag value, so only a few
+    // categories will fit) but it keeps the app returning real places instead
+    // of an empty list while the primary source is unavailable.
+    if (!photonResult.places.length && photonResult.failures.length && deadline.remaining() > 3000) {
+      const fallback = await fetchNominatimPlaces({
+        jobs: planTagJobs(categoryIds, [box], { maxTagsPerCategory: 1 }),
+        deadline
+      }).catch((error) => ({ places: [], failures: [{ tag: "nominatim", reason: error.message }], coveredCategoryIds: [] }));
+
+      if (fallback.places.length) {
+        diagnostics.sources.push({ source: "nominatim-fallback", count: fallback.places.length });
+        live.push(...fallback.places);
+      }
+
+      diagnostics.failures = [...diagnostics.failures, ...(fallback.failures || [])];
+
+      // Only one tag per category is queried here, so this cannot honestly
+      // claim a category is fully covered - leave coverage to Photon and the
+      // background ingest.
+      covered = [];
+    }
 
     persist(live);
 
@@ -303,7 +351,6 @@ export async function discoverPlaces({
     // actually completed. Marking the whole request as covered because *any*
     // category returned data made later searches for the untouched categories
     // answer 0 from cache forever.
-    const covered = nominatimResult.coveredCategoryIds || [];
 
     if (covered.length) {
       markCovered(tileKeys, covered);

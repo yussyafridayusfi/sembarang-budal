@@ -60,8 +60,19 @@ export function fetchCategories() {
   return requestJson(`${API_BASE}/categories`);
 }
 
-export function searchLocations(query, signal) {
-  return requestJson(`${API_BASE}/search?query=${encodeURIComponent(query)}`, { signal });
+/**
+ * `near` biases the lookup towards a point. It matters most for a pasted Google
+ * share link: those often carry only a bare name ("Royal Plaza"), which has
+ * matches on several continents.
+ */
+export function searchLocations(query, signal, near = null) {
+  const params = new URLSearchParams({ query });
+
+  if (near && Number.isFinite(near.lat) && Number.isFinite(near.lng)) {
+    params.set("near", `${near.lat},${near.lng}`);
+  }
+
+  return requestJson(`${API_BASE}/search?${params.toString()}`, { signal });
 }
 
 export function reverseGeocode(lat, lng, signal) {

@@ -416,12 +416,15 @@ body {
   background: var(--panel-soft);
 }
 
-.combo-list strong {
+/* Scoped to the suggestion rows on purpose: these stack a place's name above
+   its address. Unscoped, they also caught inline emphasis inside a status
+   message, which broke a sentence onto three lines mid-clause. */
+.combo-list button strong {
   display: block;
   font-size: 0.85rem;
 }
 
-.combo-list span {
+.combo-list button span {
   display: block;
   font-size: 0.73rem;
   line-height: 1.35;
@@ -993,4 +996,30 @@ ul.notice.warn {
   .search-area-btn {
     top: 12px;
   }
+}
+
+/* A failed address lookup, shown in the suggestion list rather than silently
+   leaving it empty. */
+.combo-error {
+  color: #b3261e;
+}
+
+/* A status message that explains itself over two lines: the headline, then what
+   to do about it. */
+.combo-note-title {
+  display: block;
+  font-weight: 600;
+}
+
+.combo-note-body {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-soft);
+}
+
+/* Shown when the server relaxed the query to find anything - a street or house
+   number that OSM does not hold should not read as an exact match. */
+.combo-relaxed {
+  color: #7a5900;
+  background: #fff8e1;
 }
