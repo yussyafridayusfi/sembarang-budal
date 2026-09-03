@@ -26,6 +26,19 @@ const centerQuery = ref("");
 const suggestions = ref([]);
 const searching = ref(false);
 const showSuggestions = ref(false);
+/** Set once a lookup has finished, so an empty list can say why it is empty.
+ * Previously a failed or empty lookup rendered nothing at all - no results, no
+ * message - which is indistinguishable from the app ignoring the keystroke. */
+const suggestError = ref("");
+const searched = ref(false);
+/** Set when the server had to relax the query to find anything, so the list can
+ * say which question it is actually answering. */
+const matchedQuery = ref("");
+/** How a pasted Google link was read, so the UI can say whether it pinpointed
+ * the place or only gave us its name to look up. */
+const linkInfo = ref(null);
+/** Set when only the link's surrounding area could be resolved, not the place. */
+const approximateArea = ref("");
 
 let debounceTimer = null;
 let controller = null;
@@ -77,25 +90,47 @@ function scheduleSuggest(value) {
 
   if (query.length < 2) {
     suggestions.value = [];
+    suggestError.value = "";
+    matchedQuery.value = "";
+    linkInfo.value = null;
+    approximateArea.value = "";
+    searched.value = false;
     searching.value = false;
     return;
   }
 
   searching.value = true;
   showSuggestions.value = true;
+  suggestError.value = "";
 
   debounceTimer = setTimeout(async () => {
-    controller = new AbortController();
+    const request = new AbortController();
+    controller = request;
 
     try {
-      const response = await searchLocations(query, controller.signal);
+      const response = await searchLocations(query, request.signal, props.center);
       suggestions.value = response.suggestions || [];
+      matchedQuery.value = response.matchedQuery || "";
+      linkInfo.value = response.link || null;
+      approximateArea.value = response.approximateArea || "";
+      searched.value = true;
     } catch (error) {
-      if (error.name !== "AbortError") {
-        suggestions.value = [];
+      if (error.name === "AbortError") {
+        // A newer keystroke owns the UI now - leave the spinner to that request
+        // rather than clearing it and flashing an empty list.
+        return;
       }
+
+      suggestions.value = [];
+      matchedQuery.value = "";
+      linkInfo.value = null;
+      approximateArea.value = "";
+      suggestError.value = error.message || "Address lookup failed.";
+      searched.value = true;
     } finally {
-      searching.value = false;
+      if (controller === request) {
+        searching.value = false;
+      }
     }
   }, 350);
 }
@@ -108,6 +143,11 @@ function onCenterInput(event) {
 function chooseSuggestion(suggestion) {
   centerQuery.value = "";
   suggestions.value = [];
+  suggestError.value = "";
+  matchedQuery.value = "";
+  linkInfo.value = null;
+  approximateArea.value = "";
+  searched.value = false;
   showSuggestions.value = false;
   emit("pick-center", {
     lat: suggestion.lat,
@@ -134,7 +174,7 @@ const allSelected = computed(
         <input
           id="centre-search"
           type="text"
-          placeholder="Search a place, address, or city"
+          placeholder="Place, address, Maps link, or lat,lng"
           autocomplete="off"
           :value="centerQuery"
           @input="onCenterInput"
@@ -142,8 +182,40 @@ const allSelected = computed(
           @blur="showSuggestions = false"
         />
 
-        <ul v-if="showSuggestions && (suggestions.length || searching)" class="combo-list">
+        <ul
+          v-if="showSuggestions && (suggestions.length || searching || suggestError || searched)"
+          class="combo-list"
+        >
           <li v-if="searching" class="combo-status">Searching…</li>
+          <li v-else-if="suggestError" class="combo-status combo-error">{{ suggestError }}</li>
+          <li v-else-if="!suggestions.length && linkInfo" class="combo-status combo-error">
+            <span class="combo-note-title">Not on the map: “{{ linkInfo.name }}”</span>
+            <span class="combo-note-body">
+              That link carries only a name. Share from Google Maps for the exact position, or
+              click the map to place the point.
+            </span>
+          </li>
+          <li v-else-if="!suggestions.length" class="combo-status">
+            No places match “{{ centerQuery.trim() }}”. Try adding a city, or click the map.
+          </li>
+          <li v-else-if="approximateArea" class="combo-relaxed combo-status">
+            <span class="combo-note-title">
+              “{{ linkInfo?.name }}” is not on the map
+            </span>
+            <span class="combo-note-body">
+              Showing {{ approximateArea }}, the area named in the link. Drop a pin on the map if
+              you need the exact spot.
+            </span>
+          </li>
+          <li v-else-if="linkInfo && linkInfo.kind === 'name'" class="combo-relaxed combo-status">
+            <span class="combo-note-title">Link gave a name, not a position</span>
+            <span class="combo-note-body">
+              Looked up “{{ linkInfo.name }}” — check the match below is the right one.
+            </span>
+          </li>
+          <li v-else-if="matchedQuery" class="combo-status combo-relaxed">
+            No exact match. Showing results for “{{ matchedQuery }}”.
+          </li>
           <li v-for="suggestion in suggestions" :key="`${suggestion.osmType}${suggestion.osmId}${suggestion.lat}`">
             <button type="button" @mousedown.prevent="chooseSuggestion(suggestion)">
               <strong>{{ suggestion.name }}</strong>

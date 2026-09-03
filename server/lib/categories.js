@@ -205,3 +205,26 @@ export function categoryIdForTag(key, value) {
 export function publicCategories() {
   return CATEGORY_GROUPS.map(({ id, label, icon }) => ({ id, label, icon }));
 }
+
+/**
+ * A category's tags in Photon's `key:value` filter syntax.
+ *
+ * Photon accepts a list of these in one request, so a category is a single
+ * question with its own result slot. Asking by bare key instead (`osm_tag=
+ * amenity`) shares one 50-result cap across every category that uses the key,
+ * and the dense ones bury the rest.
+ */
+export function osmTagsForCategory(categoryId) {
+  const group = CATEGORY_BY_ID.get(categoryId);
+
+  if (!group) {
+    return [];
+  }
+
+  const tags = [];
+  group.tags.forEach(([key, values]) => {
+    values.forEach((value) => tags.push(`${key}:${value}`));
+  });
+
+  return tags;
+}
