@@ -607,45 +607,73 @@ plus code, address, OSM facts, and popularity; the at-a-glance grid reports
 
 ---
 
+### A maps-app UI
+
+The sidebar was a dense form and the map a backdrop for it. The redesign makes
+the map the product and the panel a floating card over it, the way people
+already expect a maps app to behave. Everything below is in `client/src/`;
+`lib/categories.js` is the one place a category's colour, glyph and labels
+live, so a pin, a chip, a list row and the detail sheet always agree.
+
+**Layout.** The panel floats over the map with a gutter, collapses off-screen
+with a tab on its edge (`sidebar-closed`), and on phones becomes a bottom sheet
+with three heights — peek, half, full — cycled by its grip. Once a search has
+run, the controls fold into a one-line summary ("Gedangan · 2 km · 5 of 12
+categories") that expands on tap; the category strip stays out, scrolling
+horizontally, because changing category is the most common next action.
+Alt-click a chip to solo it. `/` focuses the search box.
+
+**Map.** `leaflet.markercluster` folds overlapping pins into a count badge
+coloured by the cluster's dominant category, with the runner-up as a ring;
+clustering stops at zoom 17 and spiderfies beyond. Pins are the category glyph
+on a coloured teardrop; the hovered row's pin grows, the selected one bounces.
+Tapping a pin opens a compact card — name, type, address, distance, walk time,
+"See details" — so a quick look does not cover the map. The centre dot drags to
+move the search; a handle on the ring's east edge drags to resize it, snapping
+to 50 m / 100 m / 500 m steps by size and showing the live value. Zoom and
+locate controls sit bottom-right; "Search this area" appears only when the
+visible centre has drifted, measured in screen space so a fit that pads for the
+sidebar does not count as a move.
+
+**Results.** Sticky header with count and sort; skeleton rows during the 6–14 s
+cold search instead of a bare "Searching…"; each row has a category avatar,
+type · address, straight-line distance, and walk *and* ride minutes. The
+per-category count chips now narrow the list on tap. Selecting a pin scrolls
+its row into view; a pin button on each row does the reverse.
+
+**Detail sheet.** Teleported to `body`, `Esc` closes, focus is trapped and
+restored, `←`/`→` step photos. A quick-action row — Directions, Call, Website,
+Google Maps — sits under the photo, and a share button uses the Web Share API
+with a clipboard fallback. It is a bottom sheet on phones and a centred card on
+desktop, with a skeleton while details load.
+
+**State.** The search lives in the URL hash (`#c=lat,lng&r=2000&cat=food,cafe&q=`)
+so it can be sent to the people you are meeting, and the last six centres are
+kept in `localStorage` and offered when the search box is focused empty.
+
+**Two dev-only fixes it surfaced.** The preview tooling exports `PORT` for the
+front-end dev server, which Express also honours, so the API took Vite's port
+and served the stale `dist/` build — the "redesign" was invisible. The API now
+prefers `API_PORT` (set in `nodemon.json`), and nodemon watches only `server/`
+rather than restarting on every SQLite write. And Leaflet stops click
+propagation at a popup's container, so the card's button is handled by a
+capture-phase listener on the map element rather than a per-popup binding.
+
+---
+
 ## Next features
 
-### 1. Better UI
+### 1. UI still to do
 
-The current sidebar is functional but dense, and the map is doing most of the
-work. Planned, roughly in order of value:
-
-**Layout and hierarchy**
-- Collapsible sidebar so the map can be used full-width; a floating search bar
-  over the map in the collapsed state.
-- Move the category filters into a horizontal scrolling strip pinned above the
-  results, closer to how a maps app presents them.
-- Sticky results header, so the count and sort control stay visible while
-  scrolling a long list.
-- Virtualised results list — 300 rows are rendered eagerly today, which is
-  noticeable on a mid-range phone.
-
-**Map interaction**
-- Marker clustering at low zoom. Several hundred markers within a 30 km radius
-  currently overlap into an unreadable mass.
-- A compact result card on marker tap, with the full panel one tap further, so
-  a quick look does not cover the map.
-- Draw the radius by dragging a handle on the circle itself, in addition to the
-  slider.
+- Virtualised results list — 300 rows are rendered eagerly, which is noticeable
+  on a mid-range phone.
 - Show the selected place's walking route, not just its straight-line distance.
-
-**Detail panel**
-- Present it as a bottom sheet on mobile rather than a centred modal.
 - Show opening hours as "open now / closes at" rather than a raw OSM
   `opening_hours` string.
-- Keyboard handling: `Esc` to close, focus trapping, restore focus on close.
-
-**Polish**
-- Skeleton placeholders during the 6–14 s cold search, instead of only a
-  "Searching…" label.
 - Dark mode, following `prefers-color-scheme`.
-- Save recent searches and let a centre be bookmarked.
-- Shareable URLs that encode centre, radius and categories, so a search can be
-  sent to the people you are meeting.
+- Bookmark a centre, and react to `hashchange` so a pasted link in the same tab
+  applies without a reload.
+- Swipe gestures on the mobile sheets; today the grip is tap-to-cycle.
 
 ### 2. Use the device's current location
 

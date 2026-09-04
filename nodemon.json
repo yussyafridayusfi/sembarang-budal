@@ -1,0 +1,7 @@
+{
+  "watch": ["server"],
+  "ext": "js,json",
+  "env": {
+    "API_PORT": "3000"
+  }
+}

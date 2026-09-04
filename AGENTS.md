@@ -42,8 +42,15 @@ There is no test script.
     "N of M reviews" on every finding; nothing is inferred without a mention
 - `server/routes/` — `places.js` (search, nearby, details) and `locations.js`
   (saved meeting-point locations)
-- `client/src/` — Vue 3 SPA; `MapView.vue` (Leaflet), `PlaceSearchPanel.vue`,
-  `PlaceResults.vue`, `PlaceDetailModal.vue`, `MeetingPointPanel.vue`
+- `client/src/` — Vue 3 SPA; `MapView.vue` (Leaflet + markercluster, draggable
+  centre and radius handle, popup cards), `PlaceSearchPanel.vue` (search,
+  summary bar, chip strip), `PlaceResults.vue`, `PlaceDetailModal.vue` (bottom
+  sheet on phones), `MeetingPointPanel.vue`; `lib/categories.js` is the single
+  source for a category's colour, glyph and labels. `App.vue` keeps the search
+  in the URL hash and recent centres in `localStorage`.
+- `nodemon.json` — dev API runs on `API_PORT=3000` and watches only `server/`;
+  `PORT` alone is honoured in production. Tools that export `PORT` for the Vite
+  dev server would otherwise hand it to Express and serve the stale `dist/`.
 
 ## Things worth knowing before changing the discovery path
 

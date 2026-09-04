@@ -9,7 +9,9 @@ import { getStore } from "./lib/db.js";
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+// API_PORT wins in development so the API stays on 3000 (where Vite proxies to)
+// even when a tool exports PORT for the front-end dev server.
+const PORT = process.env.API_PORT || process.env.PORT || 3000;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
