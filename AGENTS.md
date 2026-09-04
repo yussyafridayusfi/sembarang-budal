@@ -25,6 +25,8 @@ There is no test script.
     policy, which is why it is no longer on the request path.
   - `sources/overpass.js` — complete but slow and often failing; background only
   - `categories.js` — the category taxonomy, and the OSM tags each maps to
+  - `sources/googleMaps.js` — resolves text OSM cannot place through Google
+    Maps' embed endpoint; one request per distinct text, cached in `geocodes`
   - `mapLink.js` — resolves a pasted Google Maps / share link to coordinates,
     or to a place name when that is all the link carries
   - `addressQuery.js` — progressively coarser variants of a typed address, so a
@@ -60,6 +62,12 @@ There is no test script.
   Marking a whole request as covered because one category succeeded makes later
   searches for the others answer 0 from cache. The same applies one level down:
   do not mark a category covered having queried only some of its tags.
+- **The Google Maps resolver is a last resort, not a search backend.** It runs
+  only when OSM found nothing relevant, or the text has a house number, or a
+  pasted link yielded only a name. Never call it per keystroke. Read the embed
+  payload's *place record* (`["0x…:0x…","<address>",[lat,lng]`), not the first
+  coordinate pair in the page - that is the viewport centre, hundreds of metres
+  off.
 - **Both location boxes accept a raw `lat,lng`.** It is the exact, free way to
   pin a place no geocoder holds. Keep the pattern anchored to the whole input.
 - **A `share.google` link has no coordinates in it.** It redirects to Google

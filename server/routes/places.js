@@ -8,10 +8,16 @@ import { searchPhoton } from "../lib/sources/photon.js";
 import {
   buildQueryVariants,
   filterByRelevance,
+  normalizeAddressQuery,
   parseLatLngText,
   splitNameAndArea
 } from "../lib/addressQuery.js";
 import { findMapLink, resolveMapLink } from "../lib/mapLink.js";
+import {
+  googleMapsResolverEnabled,
+  looksLikeStreetAddress,
+  resolveViaGoogleMaps
+} from "../lib/sources/googleMaps.js";
 import { fetchJson } from "../lib/http.js";
 
 const router = express.Router();
@@ -262,7 +268,8 @@ router.get("/search", async (req, res) => {
     linkContext = resolved;
     query = resolved.name;
 
-    // Google knows its own places; try it before falling back to OSM.
+    // Google knows its own places; try it before falling back to OSM. The
+    // Places API first when a key is configured, then Google Maps itself.
     try {
       const viaGoogle = await googlePlaceSuggestions(resolved.name, near);
 
@@ -272,6 +279,23 @@ router.get("/search", async (req, res) => {
     } catch (error) {
       console.warn(`[search] Google place lookup failed: ${error.message}`);
     }
+
+    // A Google link names a Google place, so Google Maps resolves it exactly
+    // where OSM may not hold it at all. When it does, the link has effectively
+    // been pinpointed: report it as coordinates so the UI does not warn about an
+    // ambiguity that no longer exists.
+    try {
+      const viaMaps = await resolveViaGoogleMaps(resolved.name, { timeoutMs: 8000 });
+
+      if (viaMaps) {
+        return res.json({
+          suggestions: [viaMaps],
+          link: { kind: "coordinates", name: resolved.name, precision: "google-maps" }
+        });
+      }
+    } catch (error) {
+      console.warn(`[search] Google Maps resolver failed: ${error.message}`);
+    }
   }
 
   // Progressively coarser versions of what was typed. A query that works costs
@@ -279,6 +303,15 @@ router.get("/search", async (req, res) => {
   // A link gives a proper name, and truncating a proper name matches the wrong
   // place confidently - so relaxation is limited to normalisation there.
   const variants = buildQueryVariants(query, { dropTokens: !linkContext });
+
+  // Relevance is judged against what was *asked*, not against the relaxed
+  // variant that happened to return something. Judging against the variant
+  // let the relaxation launder junk: "MPM Learning Center Sidoarjo" relaxed to
+  // "learning center sidoarjo", against which "XL Center ... Sidoarjo" is a
+  // perfectly good match - and that "match" then blocked the exact Google
+  // resolution from ever running. Normalised so "jl" and "no 34" do not count
+  // as identifying tokens the result must carry.
+  const relevanceQuery = normalizeAddressQuery(query) || query;
 
   /**
    * Try each variant against one source, stopping at the first that answers.
@@ -298,8 +331,9 @@ router.get("/search", async (req, res) => {
         completed = true;
 
         // A fuzzy source will answer an unknown name with a global near-miss.
-        // Drop anything sharing no identifying token with what was asked.
-        const relevant = filterByRelevance(found, variant);
+        // Drop anything that does not carry the identifying tokens of what was
+        // asked - the original request, not this variant.
+        const relevant = filterByRelevance(found, relevanceQuery);
 
         if (relevant.length) {
           return { suggestions: relevant, matchedQuery: variant, error: null, completed: true };
@@ -369,6 +403,36 @@ router.get("/search", async (req, res) => {
     }
   }
 
+  // Google Maps, in two situations only - never on an ordinary keystroke:
+  //  - OSM found nothing relevant, so the place may simply not be in OSM; or
+  //  - the text carries a house number. OSM does not hold house-level data in
+  //    Indonesia, so "Jl. Tumapel No.34" can only ever come back from OSM as
+  //    the nearest street, while Google has the exact spot. Its result goes
+  //    first; the OSM suggestions stay underneath.
+  if (googleMapsResolverEnabled() && (!result.suggestions.length || looksLikeStreetAddress(query))) {
+    try {
+      const viaMaps = await resolveViaGoogleMaps(query, { timeoutMs: 8000 });
+
+      if (viaMaps) {
+        // Drop an OSM row that is the same spot, so the exact pin is not
+        // duplicated by its own street.
+        const rest = result.suggestions.filter(
+          (item) => haversineDistanceMeters(item.lat, item.lng, viaMaps.lat, viaMaps.lng) > 40
+        );
+
+        result = {
+          ...result,
+          suggestions: [viaMaps, ...rest],
+          matchedQuery: result.suggestions.length ? result.matchedQuery : variants[0],
+          error: null,
+          completed: true
+        };
+      }
+    } catch (error) {
+      console.warn(`[search] Google Maps resolver failed: ${error.message}`);
+    }
+  }
+
   // Only a genuine outage is an error. "Nothing found" is a valid answer, and
   // the client renders it as one.
   if (!result.suggestions.length && result.error && !result.completed) {
@@ -400,13 +464,22 @@ router.get("/search", async (req, res) => {
   // notion of relevance, which for a name shared by several places puts them in
   // an order that looks arbitrary to someone who meant the one near them -
   // "Royal Plaza" listed Surabaya, then Lima, then Hargeisa.
-  const ordered = near
-    ? [...result.suggestions].sort(
-        (a, b) =>
-          haversineDistanceMeters(near.lat, near.lng, a.lat, a.lng) -
-          haversineDistanceMeters(near.lat, near.lng, b.lat, b.lng)
-      )
-    : result.suggestions;
+  // An exact Google pin stays first regardless: it answers the text as typed,
+  // and distance to the bias point is not a reason to rank a nearer, vaguer
+  // OSM row above it.
+  const [exact, others] = result.suggestions[0]?.source === "google-maps"
+    ? [result.suggestions.slice(0, 1), result.suggestions.slice(1)]
+    : [[], result.suggestions];
+
+  const ordered = exact.concat(
+    near
+      ? [...others].sort(
+          (a, b) =>
+            haversineDistanceMeters(near.lat, near.lng, a.lat, a.lng) -
+            haversineDistanceMeters(near.lat, near.lng, b.lat, b.lng)
+        )
+      : others
+  );
 
   // Set only when the query was genuinely relaxed, so the UI can say so rather
   // than silently answering a different question than the one that was asked.

@@ -102,6 +102,16 @@ function createSqliteStore(DatabaseSync, filePath) {
       payload_json TEXT NOT NULL,
       updated_at INTEGER NOT NULL
     );
+
+    -- Resolved free-text lookups against Google Maps, keyed by normalised
+    -- query. Each distinct text is fetched from Google once and answered from
+    -- here afterwards, which is what keeps the resolver from hammering an
+    -- endpoint that has no rate-limit contract with us.
+    CREATE TABLE IF NOT EXISTS geocodes (
+      query_key TEXT PRIMARY KEY,
+      payload_json TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
   `);
 
   const upsertPlaceStatement = db.prepare(`
@@ -135,6 +145,11 @@ function createSqliteStore(DatabaseSync, filePath) {
   const upsertRouteStatement = db.prepare(`
     INSERT INTO routes (id, payload_json, updated_at) VALUES (?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET payload_json = excluded.payload_json, updated_at = excluded.updated_at
+  `);
+  const selectGeocodeStatement = db.prepare("SELECT payload_json, updated_at FROM geocodes WHERE query_key = ?");
+  const upsertGeocodeStatement = db.prepare(`
+    INSERT INTO geocodes (query_key, payload_json, updated_at) VALUES (?, ?, ?)
+    ON CONFLICT(query_key) DO UPDATE SET payload_json = excluded.payload_json, updated_at = excluded.updated_at
   `);
 
   return {
@@ -252,6 +267,25 @@ function createSqliteStore(DatabaseSync, filePath) {
       }
     },
 
+    /** A cached resolver answer, with when it was stored, or null. */
+    getGeocode(key) {
+      const row = selectGeocodeStatement.get(key);
+
+      if (!row) {
+        return null;
+      }
+
+      try {
+        return { payload: JSON.parse(row.payload_json), updatedAt: Number(row.updated_at) };
+      } catch {
+        return null;
+      }
+    },
+
+    saveGeocode(key, payload) {
+      upsertGeocodeStatement.run(key, JSON.stringify(payload), Date.now());
+    },
+
     stats() {
       const places = db.prepare("SELECT COUNT(*) AS total FROM places").get();
       const tiles = db.prepare("SELECT COUNT(*) AS total FROM coverage").get();
@@ -274,6 +308,7 @@ function createMemoryStore(snapshotPath) {
   const places = new Map();
   const coverage = new Map();
   const routes = new Map();
+  const geocodes = new Map();
   let snapshotTimer = null;
 
   if (snapshotPath && fs.existsSync(snapshotPath)) {
@@ -282,6 +317,7 @@ function createMemoryStore(snapshotPath) {
       (raw.places || []).forEach((place) => places.set(place.id, place));
       Object.entries(raw.coverage || {}).forEach(([key, value]) => coverage.set(key, value));
       Object.entries(raw.routes || {}).forEach(([key, value]) => routes.set(key, value));
+      Object.entries(raw.geocodes || {}).forEach(([key, value]) => geocodes.set(key, value));
     } catch (error) {
       console.warn(`[db] cannot read snapshot: ${error.message}`);
     }
@@ -301,7 +337,8 @@ function createMemoryStore(snapshotPath) {
           JSON.stringify({
             places: Array.from(places.values()),
             coverage: Object.fromEntries(coverage),
-            routes: Object.fromEntries(routes)
+            routes: Object.fromEntries(routes),
+            geocodes: Object.fromEntries(geocodes)
           })
         );
       } catch (error) {
@@ -405,6 +442,16 @@ function createMemoryStore(snapshotPath) {
 
     getRoute(id) {
       return routes.get(id) || null;
+    },
+
+    getGeocode(key) {
+      const entry = geocodes.get(key);
+      return entry ? { payload: entry.payload, updatedAt: entry.updatedAt } : null;
+    },
+
+    saveGeocode(key, payload) {
+      geocodes.set(key, { payload, updatedAt: Date.now() });
+      scheduleSnapshot();
     },
 
     stats() {
