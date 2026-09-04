@@ -129,6 +129,7 @@ const GENERIC_NAME_WORDS = new Set([
   "hotel", "resort", "cafe", "coffee", "resto", "restaurant", "warung",
   "rumah", "sakit", "hospital", "clinic", "klinik", "apotek",
   "park", "taman", "masjid", "gereja", "kantor", "office",
+  "place", "tempat", "area", "point", "city", "town", "village",
   "no", "jalan", "gang", "kecamatan", "kelurahan", "kabupaten", "kota", "desa"
 ]);
 
@@ -145,7 +146,12 @@ function nameTokens(value) {
  * "MPM Learning Center - Sidoarjo".
  */
 export function distinctiveTokens(query) {
-  return nameTokens(query).filter((token) => token.length > 1 && !GENERIC_NAME_WORDS.has(token));
+  return nameTokens(query).filter(
+    // A bare number is a house number or a postcode, not an identity: requiring
+    // "101" to appear would reject every OSM row for an address OSM only holds
+    // at street level.
+    (token) => token.length > 1 && !/^\d+$/.test(token) && !GENERIC_NAME_WORDS.has(token)
+  );
 }
 
 /**
@@ -172,9 +178,20 @@ export function filterByRelevance(results, query) {
     return results;
   }
 
+  // With one or two distinctive tokens, all of them; with three or more, a
+  // majority. "Any one" was too loose: "zzzqqwwx nonsense" kept "No Nonsense
+  // Fitness" in Edinburgh on the strength of "nonsense", and "MPM Learning
+  // Center Sidoarjo" kept "XL Center ... Sidoarjo" on "sidoarjo" alone - which
+  // then read as a real match and stopped the exact Google resolution from ever
+  // being tried. A majority from three up leaves room for the one token OSM
+  // lacks: "tumapel ketajen gedangan" still accepts "Jalan Raya Ketajen,
+  // Gedangan", because Tumapel is the street OSM does not have.
+  const needed = wanted.length <= 2 ? wanted.length : Math.ceil(wanted.length / 2);
+
   return results.filter((result) => {
     const haystack = new Set(nameTokens(`${result.name || ""} ${result.displayName || ""}`));
-    return wanted.some((token) => haystack.has(token));
+    const matched = wanted.filter((token) => haystack.has(token)).length;
+    return matched >= needed;
   });
 }
 

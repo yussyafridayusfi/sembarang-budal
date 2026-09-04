@@ -441,12 +441,16 @@ matching on "learning center" alone, none containing "MPM" or "Sidoarjo", and a
 candidates is worse than returning nothing: the user is invited to pin a place
 9,000 km from where they meant.
 
-`filterByRelevance` in `server/lib/addressQuery.js` now drops any result sharing
-no *distinctive* token with the query — distinctive meaning "not a generic place
-word", so "MPM" and "Sidoarjo" count while "learning" and "center" do not. It is
-matched against name and address together, so a place named for its street still
-passes, and a fully generic query is left unfiltered rather than filtered
-arbitrarily.
+`filterByRelevance` in `server/lib/addressQuery.js` now requires a result to
+share the query's *distinctive* tokens — distinctive meaning "not a generic
+place word", so "MPM" and "Sidoarjo" count while "learning" and "center" do
+not. With one or two such tokens it must match all of them; with three or more,
+a majority, which leaves room for the one token OSM lacks (the unmapped street
+in "tumapel ketajen gedangan"). Matching is against name and address together,
+so a place named for its street still passes, and a fully generic query is left
+unfiltered rather than filtered arbitrarily. "Any one token" was tried first
+and was too loose: "zzzqqwwx nonsense" kept a "No Nonsense Fitness" in
+Edinburgh on the strength of "nonsense".
 
 With nothing left to show, the trailing area of the link name is used instead:
 "MPM Learning Center - **Sidoarjo**". The row reads *"MPM Learning Center -
@@ -466,11 +470,53 @@ longer string would take the "16 18" out of "Jalan Achmad Yani 16-18" and drop a
 pin off the coast of Africa. Two bare integers are rejected too — far more
 likely a house number than a position.
 
-**A limitation that remains, and cannot be fixed here:** MPM Learning Center is
+**Exact resolution through Google Maps.** The decision was taken to resolve
+these through Google directly, accepting that this is automated access to
+content Google's terms restrict. `server/lib/sources/googleMaps.js` does it in
+the narrowest way that works. It uses the public *embed* endpoint - the request
+an `<iframe>` embed makes - which is ~3 KB, needs no JavaScript, shows no
+consent interstitial, and carries the resolved place as a plain array: Google's
+feature id, the formatted address, `[lat, lng]`. Measured against the
+alternatives: the Search page behind a `share.google` link has **no**
+coordinates; the full Maps page has them, but the first pair it exposes is the
+*viewport* centre (`-7.3970`) which sat 700 m from the place; the embed payload
+carries the pin (`-7.3907`).
+
+What it resolved, from one request each:
+
+| typed or pasted | Google Maps returned |
+| --- | --- |
+| `share.google/…` → "MPM Learning Center - Sidoarjo" | MPM Learning Center - Sidoarjo, Jl. Raya Sedati No.101, Blinjo, Wedi, Kec. Gedangan — `-7.3907092, 112.7516072` |
+| `jl tumapel no 34 ketajen gedangan` | **Jl. Tumapel No.34**, Ketajen, Kec. Gedangan — `-7.3858087, 112.7383226` (house-level; OSM had only the street) |
+| "Royal Plaza" (no bias at all) | Royal Plaza, Jl. Ahmad Yani No.16-18, Wonokromo, Surabaya |
+| `zzzqqwwx nonsense place` | nothing — the payload has no place record |
+
+Constraints, all deliberate. It runs in three situations only: a pasted link
+yielded a name, OSM found nothing relevant, or the text carries a house number
+(OSM does not hold house-level data in Indonesia, so only Google will have it).
+It never runs on an autocomplete keystroke. Every distinct text is fetched once
+and cached in the `geocodes` table for 30 days (a miss for one day); live
+requests are serialised 800 ms apart. Results still pass `filterByRelevance`.
+`GOOGLE_MAPS_RESOLVER=0` turns it off with no other effect. Nothing here is
+bulk collection - each cached place is one somebody asked about, by name, once.
+Google can change the payload or block the client without notice; when that
+happens the OSM path is what remains, and the app keeps working on it.
+
+**Formerly a limitation, now resolved by the above:** MPM Learning Center is
 not in OpenStreetMap at all. Nominatim returns zero for every spelling of it.
 Searching its address instead — `Jl. Raya Sedati No.101, Wedi, Kec. Gedangan,
 Sidoarjo`, from the Google panel — lands within about a kilometre. For an exact
 pin, share from the Maps app or set `GOOGLE_PLACES_API_KEY`.
+
+**And the relaxation was laundering junk through the filter.** Relevance was
+judged against whichever *relaxed variant* returned results. "MPM Learning
+Center Sidoarjo" relaxed to "learning center sidoarjo", against which "XL
+Center … Sidoarjo" is a perfectly good match - and that "match" then counted as
+OSM having an answer, so the exact Google resolution never ran. Relevance is
+now judged against the original request, normalised (so `jl` and `no 34` are
+not tokens a result must carry, and bare numbers never are). Verified:
+"zzzqqwwx nonsense place" now returns nothing instead of an Edinburgh gym, and
+typed "MPM Learning Center Sidoarjo" resolves to the exact pin.
 
 **And a fourth, in the CSS.** `.combo-list strong` was `display: block`, which is
 right for a suggestion row — the place name sits above its address — but it also
