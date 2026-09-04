@@ -2,6 +2,14 @@ import { getStore } from "./db.js";
 import { reverseGeocode } from "./sources/nominatim.js";
 import { fetchJson } from "./http.js";
 import { describeTags, getCategory } from "./categories.js";
+import { fetchGoogleMapsCard, googleMapsResolverEnabled } from "./sources/googleMaps.js";
+import {
+  fetchPlaceByPlaceId,
+  googlePlacesApiEnabled,
+  searchNearbyPlaceId,
+  searchTextPlaceId
+} from "./googlePlacesApi.js";
+import { analyzeReviews, buildAttributes } from "./reviewInsights.js";
 
 /**
  * Place details, built only from data we actually have.
@@ -10,11 +18,27 @@ import { describeTags, getCategory } from "./categories.js";
  * Instagram handles from a hash of the coordinates, and illustrated every place
  * with the same stock photos. That is worse than showing nothing, because a
  * user cannot tell the invented fields from the real ones. Everything below is
- * either a real OSM tag, a real Wikimedia image, or - when a Google Places key
- * is configured - real Google data, and each field is labelled with its source.
+ * a real OSM tag, a real Wikimedia image, a field read off the place's own
+ * Google Maps card, or - when a Places API key is configured - real Google
+ * Places data, and each field is labelled with its source.
+ *
+ * Sources, in the order they are consulted:
+ *
+ * 1. OSM tags - opening hours, phone, website, payment, cuisine, images.
+ * 2. The Google Maps card (`sources/googleMaps.js`) - rating, review count,
+ *    phone, website, category, weekly hours, open-now, and the Place ID. Free,
+ *    one cached request, but only accepted when it lands within 300 m of the
+ *    place *and* shares its name - the wrong card with a real source label is
+ *    exactly the kind of fabrication bug 11 removed.
+ * 3. Google Places API (`googlePlacesApi.js`) - photos, price, review text,
+ *    Google's review summary and structured attributes. Keyed, optional.
+ * 4. Review analysis (`reviewInsights.js`) - pros, cons, complaints, best
+ *    menu, waiting time, crowd, parking, payment, findability - counted from
+ *    the review texts in (3), and labelled with how many reviews said so.
+ *
+ * `null` throughout means "we genuinely do not know"; the UI renders it as such.
  */
 
-const GOOGLE_API_KEY = process.env.GOOGLE_PLACES_API_KEY || "";
 const OSM_API_BASE = process.env.OSM_API_BASE || "https://api.openstreetmap.org/api/0.6";
 const detailCache = new Map();
 const DETAIL_CACHE_MAX = 500;
@@ -130,7 +154,6 @@ function extractFacts(tags) {
     }
   };
 
-  push("Opening hours", tags.opening_hours);
   push("Cuisine", tags.cuisine?.replace(/;/g, ", "));
   push("Takeaway", tags.takeaway);
   push("Delivery", tags.delivery);
@@ -140,20 +163,11 @@ function extractFacts(tags) {
   push("Wheelchair access", tags.wheelchair);
   push("Smoking", tags.smoking);
   push("Toilets", tags["toilets"]);
-  push("Parking", tags["parking"]);
   push("Operator", tags.operator);
   push("Brand", tags.brand);
   push("Religion", tags.religion);
   push("Stars", tags.stars);
   push("Rooms", tags.rooms);
-
-  const payments = Object.keys(tags)
-    .filter((key) => key.startsWith("payment:") && /^(yes|only)$/i.test(String(tags[key])))
-    .map((key) => key.replace("payment:", "").replace(/_/g, " "));
-
-  if (payments.length) {
-    facts.push({ label: "Payment", value: payments.join(", ") });
-  }
 
   return facts;
 }
@@ -180,53 +194,28 @@ function extractImages(tags, name) {
   return images;
 }
 
-async function fetchGooglePlace(name, lat, lng) {
-  if (!GOOGLE_API_KEY) {
-    return null;
-  }
-
-  try {
-    const searchParams = new URLSearchParams({
-      input: name,
-      inputtype: "textquery",
-      locationbias: `circle:200@${lat},${lng}`,
-      fields: "place_id",
-      key: GOOGLE_API_KEY
-    });
-
-    const found = await fetchJson(
-      `https://maps.googleapis.com/maps/api/place/findplacefromtext/json?${searchParams.toString()}`,
-      { timeoutMs: 6000, label: "google/findplace" }
-    );
-
-    const placeId = found.candidates?.[0]?.place_id;
-
-    if (!placeId) {
-      return null;
-    }
-
-    const detailParams = new URLSearchParams({
-      place_id: placeId,
-      fields:
-        "name,formatted_address,rating,user_ratings_total,reviews,website,formatted_phone_number,opening_hours,photos,url,price_level",
-      key: GOOGLE_API_KEY
-    });
-
-    const details = await fetchJson(
-      `https://maps.googleapis.com/maps/api/place/details/json?${detailParams.toString()}`,
-      { timeoutMs: 6000, label: "google/details" }
-    );
-
-    return details.result || null;
-  } catch (error) {
-    console.warn(`[details] Google Places lookup failed: ${error.message}`);
-    return null;
-  }
+/**
+ * A "name" that is really a street. OSM POIs with no `name` tag used to be
+ * labelled by the first part of their Nominatim address, so the cache held
+ * cafes called "Jalan Garuda". Such a place has nothing to look up by name -
+ * Google would only return the street - and the panel must say so instead.
+ */
+export function isStreetLikeName(name) {
+  return /^(jalan|jln?[.]?|gang|gg[.]?|blok)(?![a-z])/i.test(String(name || "").trim());
 }
 
-const PRICE_LEVEL_LABELS = ["Free", "$", "$$", "$$$", "$$$$"];
+/** Google's Indonesian day names, as the embed card labels them. */
+const DAY_LABELS = { 1: "Senin", 2: "Selasa", 3: "Rabu", 4: "Kamis", 5: "Jumat", 6: "Sabtu", 7: "Minggu" };
 
-export async function buildPlaceDetails({ id, lat, lng, name, type }) {
+function hoursFromCard(card) {
+  if (!card?.openingHours?.length) {
+    return [];
+  }
+
+  return card.openingHours.map((entry) => `${DAY_LABELS[entry.dayIndex] || entry.day}: ${entry.text}`);
+}
+
+export async function buildPlaceDetails({ id, lat, lng, name, type, googleId = "", placeId = "", address = "" }) {
   const store = getStore();
   let stored = id ? store.getPlaceById(id) : null;
 
@@ -278,7 +267,7 @@ export async function buildPlaceDetails({ id, lat, lng, name, type }) {
     categoryId: stored?.categoryId || "other",
     tagValue: stored?.tagValue || type || "place",
     tags: stored?.tags || {},
-    address: stored?.address || ""
+    address: stored?.address || address || ""
   };
 
   const cacheKey = resolved.id;
@@ -306,7 +295,7 @@ export async function buildPlaceDetails({ id, lat, lng, name, type }) {
 
   resolved.tags = tags;
 
-  // Reverse geocode only when OSM tags gave us nothing usable.
+  // Reverse geocode only when nothing else gave us an address.
   if (!resolved.address) {
     try {
       const reverse = await reverseGeocode(resolved.lat, resolved.lng, { timeoutMs: 6000 });
@@ -316,42 +305,125 @@ export async function buildPlaceDetails({ id, lat, lng, name, type }) {
     }
   }
 
-  const google = await fetchGooglePlace(resolved.name, resolved.lat, resolved.lng);
+  // --- Google Maps card: rating, count, phone, website, hours, Place ID -----
+  const unnamed = !resolved.name || resolved.name === "Unnamed place" || isStreetLikeName(resolved.name);
+
+  let card = null;
+  // "Could not reach Google" and "Google's card was for somewhere else" are
+  // different facts, and the panel should say which one happened.
+  let cardError = "";
+
+  // An unnamed place is not looked up by name: the only name we hold is its
+  // street, and the card for a street is not the card for the cafe on it.
+  if (googleMapsResolverEnabled() && !unnamed) {
+    try {
+      card = await fetchGoogleMapsCard({
+        name: resolved.name,
+        address: resolved.address,
+        lat: resolved.lat,
+        lng: resolved.lng
+      });
+    } catch (error) {
+      cardError = error.message || "request failed";
+      console.warn(`[details] Google Maps card failed: ${cardError}`);
+    }
+  }
+
+  // --- Google Places API: photos, price, reviews, attributes ---------------
+  let google = null;
+
+  if (googlePlacesApiEnabled()) {
+    // For a named place, its Place ID (from the card) or a text search. For an
+    // unnamed one, whatever Google has within 25 m in the same category - the
+    // one keyed lookup that can recover a business OSM knows only as "a cafe".
+    const knownPlaceId =
+      placeId ||
+      card?.placeId ||
+      (unnamed
+        ? await searchNearbyPlaceId(resolved.lat, resolved.lng, resolved.categoryId)
+        : await searchTextPlaceId(resolved.name, resolved.lat, resolved.lng));
+
+    if (knownPlaceId) {
+      google = await fetchPlaceByPlaceId(knownPlaceId);
+    }
+  }
 
   const contacts = {
     phone: normalizePhone(
-      google?.formatted_phone_number || firstTag(tags, ["phone", "contact:phone", "contact:mobile"])
+      google?.phone || card?.phone || firstTag(tags, ["phone", "contact:phone", "contact:mobile"])
     ),
-    website: normalizeWebsite(google?.website || firstTag(tags, ["website", "contact:website", "url"])),
+    website: normalizeWebsite(google?.website || card?.website || firstTag(tags, ["website", "contact:website", "url"])),
     instagram: normalizeInstagram(firstTag(tags, ["contact:instagram", "instagram"])),
     facebook: normalizeWebsite(firstTag(tags, ["contact:facebook", "facebook"])),
     email: firstTag(tags, ["email", "contact:email"])
   };
 
   const images = extractImages(tags, resolved.name);
+
+  // Served through our own proxy so the API key never reaches the browser.
+  (google?.photos || []).forEach((photo, index) => {
+    images.push({
+      url: `/api/place/photo?name=${encodeURIComponent(photo.name)}&w=1000`,
+      alt: `${resolved.name} photo ${index + 1}`,
+      credit: photo.attribution ? `Google · ${photo.attribution}` : "Google"
+    });
+  });
+
   const category = getCategory(resolved.categoryId);
 
-  const reviews = (google?.reviews || []).slice(0, 5).map((review) => ({
-    author: review.author_name,
-    rating: review.rating,
-    text: review.text,
-    relativeTime: review.relative_time_description
-  }));
+  const reviews = (google?.reviews || []).slice(0, 5);
+  const rating = google?.rating ?? card?.rating ?? null;
+  const reviewCount = google?.reviewCount ?? card?.reviewCount ?? null;
 
-  if (google?.photos?.length) {
-    google.photos.slice(0, 5).forEach((photo, index) => {
-      images.push({
-        url: `https://maps.googleapis.com/maps/api/place/photo?maxwidth=1000&photo_reference=${photo.photo_reference}&key=${GOOGLE_API_KEY}`,
-        alt: `${resolved.name} photo ${index + 1}`,
-        credit: "Google Places"
-      });
-    });
-  }
+  const insights = analyzeReviews(reviews, {
+    reviewCount,
+    googleSummary: google?.summary?.reviews || google?.summary?.generative || google?.summary?.editorial || ""
+  });
+
+  const attributes = buildAttributes({ google, osmTags: tags, insights });
+
+  // Hours: the API's localised weekday text, else the card's weekly table,
+  // else the raw OSM opening_hours string.
+  const openingHours = google?.openingHours?.length
+    ? google.openingHours
+    : card?.openingHours?.length
+      ? hoursFromCard(card)
+      : tags.opening_hours
+        ? [tags.opening_hours]
+        : [];
+
+  const openNow = google?.openNow ?? card?.openNow ?? null;
+
+  /** Where each headline field came from, for the UI to print beside it. */
+  const provenance = {
+    rating: google?.rating != null ? "google-places" : card?.rating != null ? "google-maps" : null,
+    reviewCount: google?.reviewCount != null ? "google-places" : card?.reviewCount != null ? "google-maps" : null,
+    price: google?.priceRange || google?.priceLevel ? "google-places" : null,
+    hours: google?.openingHours?.length
+      ? "google-places"
+      : card?.openingHours?.length
+        ? "google-maps"
+        : tags.opening_hours
+          ? "osm"
+          : null,
+    phone: google?.phone ? "google-places" : card?.phone ? "google-maps" : contacts.phone ? "osm" : null,
+    website: google?.website ? "google-places" : card?.website ? "google-maps" : contacts.website ? "osm" : null,
+    photos: google?.photos?.length ? "google-places" : images.length ? "osm" : null,
+    reviews: reviews.length ? "google-places" : null
+  };
+
+  const dataSources = [
+    "OpenStreetMap",
+    ...(resolved.address && !stored?.address ? ["Nominatim"] : []),
+    ...(card ? ["Google Maps"] : []),
+    ...(google ? ["Google Places API"] : []),
+    ...(images.some((image) => image.credit === "Wikimedia Commons") ? ["Wikimedia Commons"] : [])
+  ].filter((value, index, list) => list.indexOf(value) === index);
 
   const detail = {
     id: resolved.id,
-    name: google?.name || resolved.name,
-    address: resolved.address || google?.formatted_address || "",
+    name: google?.name || card?.name || resolved.name,
+    address: google?.address || card?.address || resolved.address || "",
     coordinates: { lat: resolved.lat, lng: resolved.lng },
     categoryId: resolved.categoryId,
     categoryLabel: category?.label || "Other",
@@ -361,30 +433,66 @@ export async function buildPlaceDetails({ id, lat, lng, name, type }) {
     contacts,
     links: {
       googleMaps:
-        google?.url ||
-        `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-          `${resolved.name} ${resolved.lat},${resolved.lng}`
-        )}`,
+        google?.googleMapsUri ||
+        (card?.placeId
+          ? `https://www.google.com/maps/place/?q=place_id:${card.placeId}`
+          : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+              `${resolved.name} ${resolved.lat},${resolved.lng}`
+            )}`),
       directions: `https://www.google.com/maps/dir/?api=1&destination=${resolved.lat},${resolved.lng}`,
       openStreetMap: stored?.osmId
         ? `https://www.openstreetmap.org/${stored.osmType}/${stored.osmId}`
-        : `https://www.openstreetmap.org/#map=18/${resolved.lat}/${resolved.lng}`
+        : `https://www.openstreetmap.org/#map=18/${resolved.lat}/${resolved.lng}`,
+      // Where a missing name gets fixed for good - for this app and every other
+      // OSM-based one.
+      editOpenStreetMap: stored?.osmId
+        ? `https://www.openstreetmap.org/edit?${stored.osmType}=${stored.osmId}`
+        : `https://www.openstreetmap.org/edit#map=19/${resolved.lat}/${resolved.lng}`
     },
+    // True when the only "name" we have is a street or nothing at all.
+    unnamed: unnamed && !google?.name,
     // `null` means "we genuinely do not know", which the UI renders as such
     // rather than filling in a plausible-looking number.
-    rating: typeof google?.rating === "number" ? google.rating : null,
-    reviewCount: typeof google?.user_ratings_total === "number" ? google.user_ratings_total : null,
-    priceLevel:
-      typeof google?.price_level === "number" ? PRICE_LEVEL_LABELS[google.price_level] || null : null,
+    rating,
+    reviewCount,
+    priceLevel: google?.priceLevel || null,
+    priceRange: google?.priceRange || null,
     reviews,
-    openingHours: google?.opening_hours?.weekday_text || (tags.opening_hours ? [tags.opening_hours] : []),
-    openNow: typeof google?.opening_hours?.open_now === "boolean" ? google.opening_hours.open_now : null,
-    dataSources: [
-      "OpenStreetMap",
-      ...(google ? ["Google Places"] : []),
-      ...(resolved.address ? ["Nominatim"] : [])
-    ].filter((value, index, list) => list.indexOf(value) === index),
-    hasRichData: Boolean(google) || images.length > 0 || Object.values(contacts).some(Boolean)
+    openingHours,
+    openNow,
+    statusText: card?.statusText || "",
+    google: card || google
+      ? {
+          placeId: google?.placeId || card?.placeId || placeId || "",
+          googleId: card?.googleId || googleId || "",
+          categoryLabel: card?.categoryLabel || "",
+          plusCode: card?.plusCode || ""
+        }
+      : null,
+    insights,
+    attributes,
+    provenance,
+    dataSources,
+    hasRichData:
+      Boolean(google) || Boolean(card) || images.length > 0 || Object.values(contacts).some(Boolean),
+    // What is missing and why, so the panel can say it in one honest line.
+    limitations: [
+      ...(!googlePlacesApiEnabled()
+        ? ["Photos, price, review text and Google's parking/payment attributes need GOOGLE_PLACES_API_KEY."]
+        : []),
+      ...(unnamed && !google?.name
+        ? [
+            "This place has no name in OpenStreetMap - it is shown by its street - so there is nothing to look up. If you know it, add its name on OpenStreetMap."
+          ]
+        : []),
+      ...(googleMapsResolverEnabled() && !card && !unnamed
+        ? [
+            cardError
+              ? `Google Maps could not be reached for this place (${cardError}); rating, hours and contact may be missing.`
+              : "No Google Maps card matched this place closely enough to trust."
+          ]
+        : [])
+    ]
   };
 
   if (detailCache.size >= DETAIL_CACHE_MAX) {

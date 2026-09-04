@@ -32,7 +32,14 @@ There is no test script.
   - `addressQuery.js` — progressively coarser variants of a typed address, so a
     street or house number OSM does not hold degrades to the village instead of
     returning nothing
-  - `placeDetails.js` — details from real data only
+  - `placeDetails.js` — details from real data only: OSM tags, the Google Maps
+    card, Google Places API (keyed), and counted review findings; every field
+    carries its source and `null` means unknown
+  - `googlePlacesApi.js` — Places API (New) adapter, keyed and optional; photos
+    are served through `/api/place/photo` so the key never reaches the browser
+  - `reviewInsights.js` — pros, cons, complaints, best menu, waiting time,
+    crowd, parking, payment, findability, *counted* from review texts with
+    "N of M reviews" on every finding; nothing is inferred without a mention
 - `server/routes/` — `places.js` (search, nearby, details) and `locations.js`
   (saved meeting-point locations)
 - `client/src/` — Vue 3 SPA; `MapView.vue` (Leaflet), `PlaceSearchPanel.vue`,
@@ -84,5 +91,40 @@ There is no test script.
 - **Geocoders are all-or-nothing on free text.** One unplaceable token returns
   zero results, not a coarser match. Relax the query instead of reporting "not
   found" - and say so when you do.
+- **The Google Maps embed card carries more than coordinates.** Rating, review
+  count, phone, website, category, weekly hours, open-now and the Place ID are
+  all in the ~3 KB payload. Photos, price, review text and attributes are not -
+  those are Places API only. Only attach a card to an OSM place when it lands
+  within 300 m *and* shares the name; a wrong card with a real source label is
+  bug 11 again.
+- **The embed place record closes with a CID string.** `["0x…","addr",[lat,lng],
+  "6838982894568862351"]` - anchor on `(?:,"\d+")?\],` before reading the
+  display name and address lines, or category and lines silently come back
+  empty. Read a closed day's hours as a balanced bracket segment, not a regex;
+  `null` there bled "Minggu Tutup, Senin, 08.00–17.00" out of one day.
+- **Build the card hint from address parts that are not the name or a house
+  number, and cascade.** An OSM address of "Royal Plaza, 16-18, Jalan…" made
+  the query "Royal Plaza Royal Plaza 16-18", which Google could not place, and
+  the miss was cached for a day. `fetchGoogleMapsCard` now tries hinted → city
+  → bare name; the 300 m distance guard is what decides, the hint only steers.
+- **Never call the Google Maps resolver on a typing fragment.** "ro", "royal
+  pla", "royal plaa" each reached Google and were cached as misses. The `/search`
+  fallback requires a finished-looking query: two identifying tokens with the
+  last at least four letters, or a house number.
+- **Test details with `point/…` ids, never a made-up `node/N`.** `node/1` is a
+  real node in Italy and `node/999999999` is in Minnesota; the details route
+  trusts the OSM id over the client's coordinates, so a fake id silently moves
+  the place and the 300 m card guard then - correctly - rejects the card.
+- **Never label an unnamed POI by its street.** Nominatim falls back to the
+  first part of `display_name`; that made cafes called "Jalan Garuda". Drop
+  unnamed POIs at the source (as Overpass and Photon do) and treat a
+  street-like name as `unnamed` in details - never look it up by name.
+- **Do not write regexes through a bash heredoc into Python.** The heredoc
+  passes `` as a single backslash, Python turns it into a backspace byte, and
+  the regex then matches nothing while looking fine in an editor. Use the Edit
+  tool or a node string replacement for anything with a backslash.
+- **Review findings are counts, not facts.** "Parking: difficult" must always
+  read "2 of 5 reviews". Five API review texts never speak for ten thousand
+  ratings; keep `basedOn` and `reviewCount` apart in the UI.
 - **Never invent place data.** Missing ratings, photos and phone numbers are
   reported as unknown, not filled in with plausible values.

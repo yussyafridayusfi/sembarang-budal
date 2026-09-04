@@ -115,6 +115,12 @@ export function fetchPlaceDetails(place, signal) {
     type: String(place.tagValue || place.type || "")
   });
 
+  // Carried by Google-resolved suggestions; the server uses them to skip
+  // lookups it would otherwise have to repeat.
+  if (place.googleId) params.set("googleId", String(place.googleId));
+  if (place.placeId) params.set("placeId", String(place.placeId));
+  if (place.address || place.displayName) params.set("address", String(place.address || place.displayName));
+
   return requestJson(`${API_BASE}/place/details?${params.toString()}`, { signal });
 }
 

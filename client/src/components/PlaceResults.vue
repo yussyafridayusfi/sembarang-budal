@@ -1,4 +1,20 @@
 <script setup>
+/**
+ * A place whose only "name" is a street was an unnamed POI that an older
+ * import labelled by its address. Show it as "Unnamed cafe" so nobody reads
+ * "Jalan Garuda" as the name of a cafe.
+ */
+const STREET_LIKE = /^(jalan|jln?[.]?|gang|gg[.]?|blok)(?![a-z])/i;
+
+function displayName(place) {
+  if (place.unnamed || STREET_LIKE.test(String(place.name || "").trim())) {
+    const type = String(place.tagValue || place.type || "place").replace(/_/g, " ");
+    return `Unnamed ${type}`;
+  }
+
+  return place.name;
+}
+
 import { computed, ref } from "vue";
 
 const props = defineProps({
@@ -151,7 +167,7 @@ const fillingIn = computed(() => {
         <span :class="`dot dot-${place.categoryId}`" aria-hidden="true"></span>
 
         <div class="place-body">
-          <strong class="place-name">{{ place.name }}</strong>
+          <strong class="place-name">{{ displayName(place) }}</strong>
           <span class="place-type">{{ (place.tagValue || place.type || "").replace(/_/g, " ") }}</span>
           <span v-if="place.address" class="place-address">{{ place.address }}</span>
         </div>
