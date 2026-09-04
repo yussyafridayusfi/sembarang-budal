@@ -7,6 +7,7 @@ import { reverseGeocode, searchPlaces } from "../lib/sources/nominatim.js";
 import { searchPhoton } from "../lib/sources/photon.js";
 import {
   buildQueryVariants,
+  distinctiveTokens,
   filterByRelevance,
   normalizeAddressQuery,
   parseLatLngText,
@@ -19,6 +20,7 @@ import {
   resolveViaGoogleMaps
 } from "../lib/sources/googleMaps.js";
 import { fetchJson } from "../lib/http.js";
+import { resolvePhotoUri } from "../lib/googlePlacesApi.js";
 
 const router = express.Router();
 
@@ -409,7 +411,22 @@ router.get("/search", async (req, res) => {
   //    Indonesia, so "Jl. Tumapel No.34" can only ever come back from OSM as
   //    the nearest street, while Google has the exact spot. Its result goes
   //    first; the OSM suggestions stay underneath.
-  if (googleMapsResolverEnabled() && (!result.suggestions.length || looksLikeStreetAddress(query))) {
+  // A guard against autocomplete fragments. The empty-results branch used to
+  // fire for "ro", "royal pla", "royal plaa" as someone typed - each a Google
+  // request, each cached as a miss. A query is treated as finished when its
+  // last identifying token is at least four letters (a word still being typed
+  // is usually shorter), and there are at least two identifying tokens or a
+  // house number. Cached misses bound the remaining cost.
+  const identifying = distinctiveTokens(normalizeAddressQuery(query) || query);
+  const lastToken = identifying[identifying.length - 1] || "";
+  const looksFinished =
+    looksLikeStreetAddress(query) || (identifying.length >= 2 && lastToken.length >= 4);
+
+  if (
+    googleMapsResolverEnabled() &&
+    looksFinished &&
+    (!result.suggestions.length || looksLikeStreetAddress(query))
+  ) {
     try {
       const viaMaps = await resolveViaGoogleMaps(query, { timeoutMs: 8000 });
 
@@ -604,13 +621,45 @@ router.get("/place/details", async (req, res) => {
       lat,
       lng,
       name: String(req.query.name || "").trim(),
-      type: String(req.query.type || "").trim()
+      type: String(req.query.type || "").trim(),
+      // Hints a Google-resolved suggestion already carries; they save a lookup
+      // and, for the Place ID, a paid search call.
+      googleId: String(req.query.googleId || "").trim(),
+      placeId: String(req.query.placeId || "").trim(),
+      address: String(req.query.address || "").trim()
     });
 
     return res.json(detail);
   } catch (error) {
     return res.status(502).json({ error: error.message || "Failed to load place details." });
   }
+});
+
+/**
+ * Photo proxy for Google Places images.
+ *
+ * The Places API hands out photos as resource names that must be exchanged for
+ * an image URL using the API key. Doing that exchange here, then redirecting
+ * the browser to the plain googleusercontent URL Google returns, keeps the key
+ * on the server - the previous implementation put it in every <img src>.
+ */
+router.get("/place/photo", async (req, res) => {
+  const name = String(req.query.name || "").trim();
+  const width = toNumber(req.query.w) ?? 1000;
+
+  if (!/^places\/[^/]+\/photos\/[^/]+$/.test(name)) {
+    return res.status(400).json({ error: "name must be a Places photo resource name." });
+  }
+
+  const uri = await resolvePhotoUri(name, { maxWidthPx: width });
+
+  if (!uri) {
+    return res.status(404).json({ error: "Photo unavailable." });
+  }
+
+  // Google's photo URLs are stable for a good while; let the browser keep them.
+  res.set("Cache-Control", "public, max-age=86400");
+  return res.redirect(302, uri);
 });
 
 export default router;

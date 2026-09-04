@@ -59,7 +59,11 @@ function normalizeResult(item) {
     return null;
   }
 
-  const name = item.name || item.display_name?.split(",")[0];
+  // Only a real name. Falling back to the first part of `display_name` turned
+  // every unnamed cafe into its street - 42 of 416 cached places were called
+  // "Jalan …" - and the detail panel then asked Google for the street. Overpass
+  // and Photon already drop unnamed POIs for the same reason.
+  const name = item.name;
 
   if (!name) {
     return null;

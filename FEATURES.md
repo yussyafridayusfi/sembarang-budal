@@ -525,6 +525,86 @@ lines mid-clause ("Share from the Google" / "**Maps**" / "app instead…"). The
 rule is now scoped to `.combo-list button strong`, and the notices are built as
 an explicit title line plus a body line rather than relying on inline markup.
 
+### Interactive place information
+
+The detail panel now answers the questions people actually have before going
+somewhere - is it any good, is it open, what does it cost, is parking a
+nightmare, what should I order - while keeping bug 11's rule intact: every
+value names its source, and anything we do not know says so.
+
+**What the panel shows, and where each part comes from.**
+
+| section | source | needs a key? |
+| --- | --- | --- |
+| Rating, review count | the place's Google Maps card (`sources/googleMaps.js`) | no |
+| Open now / weekly hours | Maps card → Places API → OSM `opening_hours` | no |
+| Phone, website | Places API → Maps card → OSM tags | no |
+| Photos (gallery with prev/next) | Places API via `/api/place/photo` → OSM `image` / Wikimedia | photos: yes |
+| Price range | Places API `priceRange` / `priceLevel` | yes |
+| Review summary | Places API `reviewSummary` (Google's own, drawn from all reviews) | yes |
+| Pros / Cons / Common complaints / Best menu | counted from Places API review texts (`reviewInsights.js`) | yes |
+| 🎭 Atmosphere, 🚗 Parking, 💳 Payment | Places API structured attributes → OSM tags → review mentions | partly |
+| ⏱️ Waiting time, 👥 Crowd, 📍 Location | review mentions only | yes |
+| 🔥 Popularity | Google review count, bucketed | no |
+
+**The Maps card, and why it is trusted.** The public embed payload turned out
+to carry the whole place card, not just coordinates: for Mie Gacoan Puri Surya
+Jaya it holds `4.7`, `"10.116 ulasan"`, the phone, the website, "Restoran Mie",
+seven days of hours, "Buka · Tutup pukul 23.00", and the Place ID `ChIJ…`. It is
+read by shape rather than by index - a rating is a 1–5 float followed by a
+count ending in "ulasan", hours are `["Jumat",5,[y,m,d],[["10.00–23.00",…`
+- because the array is sparse and Google shifts positions between places. A
+card is attached to an OSM place only when it lands within 300 m *and* shares
+the name's identifying tokens; otherwise the panel gets nothing from it and
+says why. The wrong card with a real source label would be fabricated data.
+
+**Why the review findings say "2 of 5".** The Places API returns at most five
+review texts. Pros, cons, complaints, best menu, waiting time, crowd, parking,
+payment and findability are *counted* from those texts against a short
+bilingual lexicon - "parkir susah", "antri 20 menit", "wajib coba mie
+gacoan" - and every finding shows its count against `basedOn`. Google's total
+(`reviewCount`) is shown separately and never implied to back the counts. No
+review texts means no findings, not plausible-looking ones. Google's own
+`reviewSummary` is preferred for the prose because it is drawn from all reviews.
+
+**Probes that shaped this, so nobody repeats them.** The full Maps place page
+fetched without JavaScript is the "no-JS" shell - no rating, photos, phone or
+hours anywhere in its 207 KB (`p=no_javascript` in the body). The Google Search
+page behind a `share.google` link has nothing either. The internal reviews RPC
+the Maps app uses was not attempted: it is undocumented, and the request was
+blocked - reasonably - as an internal endpoint; the official API is the
+supported path for review text.
+
+**Two things this surfaced.** First, the `geocodes` cache showed autocomplete
+fragments - "ro", "royal pla", "royal plaa" - had each reached Google and been
+cached as misses: the "OSM found nothing relevant" fallback fired while someone
+was still typing. The fallback now requires a finished-looking query (two
+identifying tokens with the last at least four letters, or a house number).
+Second, a card *fetch failure* and *no matching card* were reported with the
+same sentence; they are now distinguished, since one means "try again later"
+and the other means "this place is not where Google thinks it is".
+
+**Unnamed places, and the cafe called "Jalan Garuda".** A row showed 0 of 7
+known and "no Google Maps card matched". The place is a cafe with **no name
+tag in OpenStreetMap**. Nominatim's browse normalised it with
+`item.name || display_name.split(",")[0]`, which is the street - so 42 of the
+416 cached places were "named" after their road, and the detail panel then
+asked Google for "Jalan Garuda" and correctly refused the street it got back.
+Overpass and Photon already drop unnamed POIs as noise. Now: Nominatim does
+too; the 42 cached rows were purged (kept only where OSM itself carries that
+name); a street-like name is treated as `unnamed` - shown as "Unnamed cafe ·
+shown by its street", not looked up by name at all, and with a link to add its
+name on OpenStreetMap, which fixes it here and everywhere else. With a Places
+API key, an unnamed place gets one Nearby Search within 25 m restricted to its
+category types - the one lookup that can recover a business OSM knows only as
+"a cafe here". A bare "lat,lng" query to the Maps embed was tested and returns
+no place record, so there is no free reverse-by-position route.
+
+**Without a key**, which is how this was built and verified: the panel shows
+rating, review count, open-now with the weekly table, phone, website, category,
+plus code, address, OSM facts, and popularity; the at-a-glance grid reports
+"not enough data" for the rest and one line says what a key would add.
+
 ---
 
 ## Next features
