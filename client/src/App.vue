@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import MapView from "./components/MapView.vue";
 import PlaceSearchPanel from "./components/PlaceSearchPanel.vue";
 import PlaceResults from "./components/PlaceResults.vue";
@@ -14,6 +14,9 @@ import {
 } from "./services/api";
 
 const DEFAULT_CATEGORIES = ["food", "cafe", "shopping", "attraction", "outdoor"];
+const RECENT_KEY = "sembarang-budal:recent";
+const SIDEBAR_WIDTH = 420;
+const MOBILE_BREAKPOINT = 720;
 
 const mode = ref("explore");
 const categories = ref([]);
@@ -39,11 +42,94 @@ const detailError = ref("");
 const detailOpen = ref(false);
 const hoveredPlaceId = ref("");
 
+/** Desktop: the panel slides off to the left. Mobile: the sheet peeks or opens. */
+const sidebarOpen = ref(true);
+const sheetState = ref("half"); // peek | half | full
+const viewportWidth = ref(window.innerWidth);
+const isMobile = computed(() => viewportWidth.value <= MOBILE_BREAKPOINT);
+const insetLeft = computed(() => (!isMobile.value && sidebarOpen.value ? SIDEBAR_WIDTH + 16 : 0));
+
+const recent = ref(loadRecent());
+
 const detailsCache = new Map();
 let searchController = null;
 
 const selectedPlaceId = computed(() => selectedPlace.value?.id || "");
 const places = computed(() => result.value?.places || []);
+const hasResults = computed(() => Boolean(result.value));
+
+/* --------------------------------------------------------------- recents */
+
+function loadRecent() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(RECENT_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed.slice(0, 6) : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberRecent(entry) {
+  const key = `${entry.lat.toFixed(4)},${entry.lng.toFixed(4)}`;
+  const next = [
+    entry,
+    ...recent.value.filter((item) => `${item.lat.toFixed(4)},${item.lng.toFixed(4)}` !== key)
+  ].slice(0, 6);
+  recent.value = next;
+
+  try {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+  } catch {
+    // Storage may be unavailable; recents are a convenience only.
+  }
+}
+
+function clearRecent() {
+  recent.value = [];
+
+  try {
+    localStorage.removeItem(RECENT_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+/* -------------------------------------------------------------- URL state */
+
+/** The search lives in the URL hash so it can be sent to the people you are
+ * meeting: #c=lat,lng&r=2000&cat=food,cafe&q=kopi */
+function readHash() {
+  const params = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  const [lat, lng] = (params.get("c") || "").split(",").map(Number);
+  const r = Number(params.get("r"));
+  const cats = (params.get("cat") || "").split(",").filter(Boolean);
+
+  return {
+    center: Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null,
+    radius: Number.isFinite(r) && r >= 200 && r <= 30000 ? r : null,
+    categories: cats.length ? cats : null,
+    keyword: params.get("q") || ""
+  };
+}
+
+function writeHash() {
+  if (!center.value) {
+    return;
+  }
+
+  const params = new URLSearchParams();
+  params.set("c", `${center.value.lat.toFixed(5)},${center.value.lng.toFixed(5)}`);
+  params.set("r", String(radius.value));
+  params.set("cat", selectedCategories.value.join(","));
+
+  if (keyword.value.trim()) {
+    params.set("q", keyword.value.trim());
+  }
+
+  history.replaceState(null, "", `#${params.toString()}`);
+}
+
+/* ----------------------------------------------------------------- loads */
 
 async function loadCategories() {
   try {
@@ -75,15 +161,23 @@ async function labelCenter(point) {
   } catch {
     // Keep the coordinate label; naming the point is a nicety, not a blocker.
   }
+
+  rememberRecent({ lat: point.lat, lng: point.lng, label: centerLabel.value, radius: radius.value });
 }
 
 async function setCenter(point, { label = "", search = true } = {}) {
   center.value = { lat: point.lat, lng: point.lng };
+  selectedPlace.value = null;
 
   if (label) {
     centerLabel.value = label;
+    rememberRecent({ lat: point.lat, lng: point.lng, label, radius: radius.value });
   } else {
     labelCenter(point);
+  }
+
+  if (isMobile.value) {
+    sheetState.value = "half";
   }
 
   if (search) {
@@ -101,6 +195,7 @@ async function runSearch({ refresh = false } = {}) {
 
   loading.value = true;
   error.value = "";
+  writeHash();
 
   try {
     const response = await fetchNearbyPlaces(
@@ -133,6 +228,11 @@ function useMyLocation() {
     return;
   }
 
+  if (!window.isSecureContext) {
+    error.value = "Location needs a secure (https) page. Search for a place instead, or tap the map.";
+    return;
+  }
+
   locating.value = true;
   error.value = "";
 
@@ -145,11 +245,22 @@ function useMyLocation() {
       locating.value = false;
       error.value =
         geoError.code === geoError.PERMISSION_DENIED
-          ? "Location permission was denied. Search for a place instead, or click the map."
+          ? "Location permission was denied. Search for a place instead, or tap the map."
           : `Could not get your location (${geoError.message}).`;
     },
     { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
   );
+}
+
+/* --------------------------------------------------------------- details */
+
+/** Highlight on the map and in the list without opening the full sheet. */
+function previewPlace(place) {
+  selectedPlace.value = place;
+
+  if (isMobile.value && sheetState.value === "full") {
+    sheetState.value = "half";
+  }
 }
 
 async function openDetails(place) {
@@ -194,6 +305,12 @@ async function useRouteCenter() {
   await setCenter(routeCenter.value, { label: `Midpoint of ${routeLocations.value.length} locations` });
 }
 
+function cycleSheet() {
+  sheetState.value = sheetState.value === "peek" ? "half" : sheetState.value === "half" ? "full" : "peek";
+}
+
+/* -------------------------------------------------------------- watchers */
+
 // Radius and category changes re-run the search; the keyword filter is applied
 // server-side too, so it is debounced separately below.
 watch([radius, selectedCategories], () => {
@@ -212,13 +329,60 @@ watch(keyword, () => {
   }, 400);
 });
 
+// An error is worth seeing, but not forever.
+let errorTimer = null;
+watch(error, (value) => {
+  clearTimeout(errorTimer);
+
+  if (value) {
+    errorTimer = setTimeout(() => {
+      error.value = "";
+    }, 8000);
+  }
+});
+
+function onResize() {
+  viewportWidth.value = window.innerWidth;
+}
+
+function onGlobalKeydown(event) {
+  if (event.key === "Escape" && !detailOpen.value && selectedPlace.value) {
+    selectedPlace.value = null;
+  }
+
+  // "/" focuses the search box, as on most keyboard-friendly sites.
+  if (event.key === "/" && !/^(input|textarea|select)$/i.test(event.target?.tagName || "")) {
+    event.preventDefault();
+    sidebarOpen.value = true;
+    document.getElementById("centre-search")?.focus();
+  }
+}
+
 onMounted(async () => {
+  window.addEventListener("resize", onResize);
+  document.addEventListener("keydown", onGlobalKeydown);
+
+  const fromHash = readHash();
+
+  if (fromHash.radius) radius.value = fromHash.radius;
+  if (fromHash.categories) selectedCategories.value = fromHash.categories;
+  if (fromHash.keyword) keyword.value = fromHash.keyword;
+
   await Promise.all([loadCategories(), loadSavedRoute()]);
+
+  if (fromHash.center) {
+    setCenter(fromHash.center);
+  }
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("resize", onResize);
+  document.removeEventListener("keydown", onGlobalKeydown);
 });
 </script>
 
 <template>
-  <main class="app-shell">
+  <main class="app-shell" :class="{ 'sidebar-closed': !sidebarOpen, [`sheet-${sheetState}`]: isMobile }">
     <MapView
       :center="center"
       :radius="radius"
@@ -226,39 +390,72 @@ onMounted(async () => {
       :route-locations="routeLocations"
       :selected-place-id="selectedPlaceId"
       :hovered-place-id="hoveredPlaceId"
+      :inset-left="insetLeft"
+      :locating="locating"
       @select-place="openDetails"
+      @preview-place="previewPlace"
+      @hover-place="hoveredPlaceId = $event"
       @pick-center="(point) => setCenter(point)"
       @area-changed="(point) => setCenter(point)"
+      @update:radius="radius = $event"
+      @use-my-location="useMyLocation"
     />
 
-    <aside class="sidebar">
-      <div class="brand">
-        <h1>Sembarang Budal</h1>
-        <p>Find somewhere to go, anywhere inside a radius you choose.</p>
-      </div>
+    <!-- Desktop: a tab on the panel's edge collapses it so the map runs full width. -->
+    <button
+      v-if="!isMobile"
+      type="button"
+      class="sidebar-toggle"
+      :aria-expanded="sidebarOpen"
+      :title="sidebarOpen ? 'Hide panel' : 'Show panel'"
+      @click="sidebarOpen = !sidebarOpen"
+    >
+      <span aria-hidden="true">{{ sidebarOpen ? "‹" : "›" }}</span>
+      <span class="sr-only">{{ sidebarOpen ? "Hide panel" : "Show panel" }}</span>
+    </button>
 
-      <nav class="mode-tabs" role="tablist">
-        <button
-          type="button"
-          role="tab"
-          :aria-selected="mode === 'explore'"
-          :class="{ active: mode === 'explore' }"
-          @click="mode = 'explore'"
-        >
-          Explore
-        </button>
-        <button
-          type="button"
-          role="tab"
-          :aria-selected="mode === 'meeting'"
-          :class="{ active: mode === 'meeting' }"
-          @click="mode = 'meeting'"
-        >
-          Meeting point
-        </button>
-      </nav>
+    <aside class="sidebar" :aria-hidden="!isMobile && !sidebarOpen">
+      <!-- Mobile: the grip cycles peek → half → full. -->
+      <button v-if="isMobile" type="button" class="sheet-handle" aria-label="Resize panel" @click="cycleSheet">
+        <span></span>
+      </button>
 
-      <p v-if="error" class="notice error">{{ error }}</p>
+      <header class="brand">
+        <div class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M12 2a7 7 0 0 0-7 7c0 5.25 7 13 7 13s7-7.75 7-13a7 7 0 0 0-7-7m0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5"/></svg>
+        </div>
+        <div>
+          <h1>Sembarang Budal</h1>
+          <p>Somewhere to go, anywhere inside a radius you choose.</p>
+        </div>
+        <nav class="mode-tabs" role="tablist" aria-label="Mode">
+          <button
+            type="button"
+            role="tab"
+            :aria-selected="mode === 'explore'"
+            :class="{ active: mode === 'explore' }"
+            @click="mode = 'explore'"
+          >
+            Explore
+          </button>
+          <button
+            type="button"
+            role="tab"
+            :aria-selected="mode === 'meeting'"
+            :class="{ active: mode === 'meeting' }"
+            @click="mode = 'meeting'"
+          >
+            Meet up
+          </button>
+        </nav>
+      </header>
+
+      <transition name="fold">
+        <p v-if="error" class="notice error" role="alert">
+          {{ error }}
+          <button type="button" class="notice-dismiss" aria-label="Dismiss" @click="error = ''">×</button>
+        </p>
+      </transition>
 
       <template v-if="mode === 'explore'">
         <PlaceSearchPanel
@@ -270,23 +467,39 @@ onMounted(async () => {
           :keyword="keyword"
           :loading="loading"
           :locating="locating"
+          :has-results="hasResults"
+          :recent="recent"
           @update:radius="radius = $event"
           @update:selected-categories="selectedCategories = $event"
           @update:keyword="keyword = $event"
           @pick-center="(point) => setCenter(point, { label: point.label })"
           @use-my-location="useMyLocation"
           @search="runSearch"
+          @clear-recent="clearRecent"
         />
 
         <PlaceResults
+          v-if="center"
           :result="result"
           :categories="categories"
           :loading="loading"
           :selected-place-id="selectedPlaceId"
+          :hovered-place-id="hoveredPlaceId"
           @select-place="openDetails"
+          @preview-place="previewPlace"
           @hover-place="hoveredPlaceId = $event"
           @retry-live="runSearch({ refresh: true })"
         />
+
+        <section v-else class="welcome">
+          <h2>How it works</h2>
+          <ol>
+            <li><strong>Pick a centre</strong> — search, tap the map, or use your location.</li>
+            <li><strong>Set the radius</strong> — drag the ring on the map, or use the slider.</li>
+            <li><strong>Browse</strong> — filter by category, tap a pin, open the details.</li>
+          </ol>
+          <p class="welcome-tip">Tip: press <kbd>/</kbd> to jump to the search box.</p>
+        </section>
       </template>
 
       <MeetingPointPanel
