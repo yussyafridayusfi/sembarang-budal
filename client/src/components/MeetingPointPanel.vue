@@ -316,74 +316,94 @@ function formatRadius(metres) {
     </header>
 
     <div class="rows">
-      <div v-for="(row, index) in rows" :key="row.key" class="row" :class="{ 'row-unresolved': unresolved.has(row.key) }">
+      <div
+        v-for="(row, index) in rows"
+        :key="row.key"
+        class="row"
+        :class="{ 'row-unresolved': unresolved.has(row.key), 'row-is-pinned': row.lat !== null }"
+      >
         <span class="row-index">{{ index + 1 }}</span>
 
-        <div class="combo">
-          <input
-            type="text"
-            :placeholder="`Location ${index + 1} — name, address, Maps link, or lat,lng`"
-            autocomplete="off"
-            :value="row.name"
-            :aria-invalid="unresolved.has(row.key)"
-            @input="onInput(index, $event)"
-            @focus="openRow = index"
-            @blur="openRow = -1"
-          />
+        <div class="row-main">
+          <div class="combo">
+            <input
+              type="text"
+              :placeholder="`Location ${index + 1} — name, address, Maps link, or lat,lng`"
+              autocomplete="off"
+              :value="row.name"
+              :aria-invalid="unresolved.has(row.key)"
+              @input="onInput(index, $event)"
+              @focus="openRow = index"
+              @blur="openRow = -1"
+            />
 
-          <span v-if="row.lat !== null" class="row-pinned" title="Coordinates locked from your pick">pinned</span>
-          <p v-if="row.lat !== null && row.displayName" class="row-address">{{ row.displayName }}</p>
-          <p v-else-if="unresolved.has(row.key)" class="row-address row-address-error" role="alert">
-            Not found on the map — pick a suggestion, paste a Maps link, or type lat,lng.
+            <span
+              v-if="row.lat !== null"
+              class="row-check"
+              title="Pinned — the coordinates you picked are locked to this row"
+              aria-hidden="true"
+              >✓</span
+            >
+
+            <ul
+              v-if="
+                openRow === index &&
+                (suggestionsByRow[index]?.length || searchingByRow[index] || linkByRow[index])
+              "
+              class="combo-list"
+            >
+              <li v-if="searchingByRow[index]" class="combo-status">Searching…</li>
+              <li
+                v-else-if="!suggestionsByRow[index]?.length && linkByRow[index]"
+                class="combo-status combo-error"
+              >
+                <span class="combo-note-title">Not on the map: “{{ linkByRow[index].name }}”</span>
+                <span class="combo-note-body">
+                  That link carries only a name. Share from Google Maps for the exact position, or
+                  click the map to place the point.
+                </span>
+              </li>
+              <li v-else-if="areaByRow[index]" class="combo-status combo-relaxed">
+                <span class="combo-note-title">
+                  “{{ linkByRow[index]?.name }}” is not on the map
+                </span>
+                <span class="combo-note-body">
+                  Showing {{ areaByRow[index] }}, the area named in the link. Drop a pin on the map
+                  if you need the exact spot.
+                </span>
+              </li>
+              <li
+                v-else-if="linkByRow[index] && linkByRow[index].kind === 'name'"
+                class="combo-status combo-relaxed"
+              >
+                <span class="combo-note-title">Link gave a name, not a position</span>
+                <span class="combo-note-body">
+                  Looked up “{{ linkByRow[index].name }}” — check the match below is the right one.
+                </span>
+              </li>
+              <li v-for="suggestion in suggestionsByRow[index] || []" :key="`${suggestion.osmType}${suggestion.osmId}${suggestion.lat}`">
+                <button type="button" @mousedown.prevent="pickSuggestion(index, suggestion)">
+                  <span class="suggest-glyph" aria-hidden="true">📍</span>
+                  <strong>
+                    {{ suggestion.name || suggestion.displayName }}
+                    <em v-if="formatDistance(suggestion.distance)" class="suggest-distance">{{ formatDistance(suggestion.distance) }}</em>
+                  </strong>
+                  <span v-if="secondaryLine(suggestion)">{{ secondaryLine(suggestion) }}</span>
+                </button>
+              </li>
+            </ul>
+          </div>
+
+          <p v-if="row.lat !== null && secondaryLine(row)" class="row-address">
+            <span aria-hidden="true">📍</span>
+            <span class="row-address-text">{{ secondaryLine(row) }}</span>
           </p>
-
-          <ul
-            v-if="
-              openRow === index &&
-              (suggestionsByRow[index]?.length || searchingByRow[index] || linkByRow[index])
-            "
-            class="combo-list"
-          >
-            <li v-if="searchingByRow[index]" class="combo-status">Searching…</li>
-            <li
-              v-else-if="!suggestionsByRow[index]?.length && linkByRow[index]"
-              class="combo-status combo-error"
-            >
-              <span class="combo-note-title">Not on the map: “{{ linkByRow[index].name }}”</span>
-              <span class="combo-note-body">
-                That link carries only a name. Share from Google Maps for the exact position, or
-                click the map to place the point.
-              </span>
-            </li>
-            <li v-else-if="areaByRow[index]" class="combo-status combo-relaxed">
-              <span class="combo-note-title">
-                “{{ linkByRow[index]?.name }}” is not on the map
-              </span>
-              <span class="combo-note-body">
-                Showing {{ areaByRow[index] }}, the area named in the link. Drop a pin on the map
-                if you need the exact spot.
-              </span>
-            </li>
-            <li
-              v-else-if="linkByRow[index] && linkByRow[index].kind === 'name'"
-              class="combo-status combo-relaxed"
-            >
-              <span class="combo-note-title">Link gave a name, not a position</span>
-              <span class="combo-note-body">
-                Looked up “{{ linkByRow[index].name }}” — check the match below is the right one.
-              </span>
-            </li>
-            <li v-for="suggestion in suggestionsByRow[index] || []" :key="`${suggestion.osmType}${suggestion.osmId}${suggestion.lat}`">
-              <button type="button" @mousedown.prevent="pickSuggestion(index, suggestion)">
-                <span class="suggest-glyph" aria-hidden="true">📍</span>
-                <strong>
-                  {{ suggestion.name || suggestion.displayName }}
-                  <em v-if="formatDistance(suggestion.distance)" class="suggest-distance">{{ formatDistance(suggestion.distance) }}</em>
-                </strong>
-                <span v-if="secondaryLine(suggestion)">{{ secondaryLine(suggestion) }}</span>
-              </button>
-            </li>
-          </ul>
+          <p v-else-if="unresolved.has(row.key)" class="row-address row-address-error" role="alert">
+            <span aria-hidden="true">⚠</span>
+            <span class="row-address-text">
+              Not found on the map — pick a suggestion, paste a Maps link, or type lat,lng.
+            </span>
+          </p>
         </div>
 
         <button type="button" class="icon-btn" aria-label="Remove location" @click="removeRow(index)">×</button>

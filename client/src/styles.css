@@ -556,16 +556,22 @@ button {
   border-radius: 8px;
 }
 
-.row-pinned {
+/* "This row is on the map." A check inside the field reads at a glance and,
+   unlike the word "pinned", leaves room for a long name. */
+.row-check {
   position: absolute;
   top: 50%;
-  right: 9px;
+  right: 10px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
   transform: translateY(-50%);
-  font-size: 0.62rem;
+  font-size: 0.68rem;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--cat-outdoor);
+  color: #fff;
+  background: var(--success);
+  border-radius: 50%;
 }
 
 /* ---------- Search summary bar ---------- */
@@ -854,15 +860,27 @@ button {
   gap: 8px;
 }
 
+/* A meeting-point row: number, the input with its resolved address beneath,
+   and the remove button. Aligned to the top so the number and the button stay
+   level with the input rather than drifting down a row that has grown an
+   address line - which is what put the "pinned" badge beside the address. */
 .row {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 30px;
   gap: 8px;
+  align-items: start;
+}
+
+.row-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
 .row-index {
-  flex: 0 0 24px;
   height: 24px;
+  /* Centres the badge on the input's own line. */
+  margin-top: 8px;
   font-size: 0.76rem;
   font-weight: 700;
   line-height: 24px;
@@ -870,6 +888,10 @@ button {
   color: #fff;
   background: var(--accent);
   border-radius: 50%;
+}
+
+.row .icon-btn {
+  margin-top: 5px;
 }
 
 .panel-actions {
@@ -2645,17 +2667,43 @@ ul.notice.warn {
 
 /* Meeting point rows: the resolved address, or why a row blocks the save. */
 .row-address {
-  margin: 4px 0 0 2px;
-  font-size: 0.72rem;
+  display: flex;
+  gap: 5px;
+  margin: 5px 0 0 2px;
+  font-size: 0.73rem;
   line-height: 1.4;
   color: var(--text-soft);
+}
+
+.row-address > span:first-child {
+  flex: 0 0 auto;
+  opacity: 0.7;
+}
+
+/* Two lines of address, then an ellipsis: the full text is one tap away on
+   the map, and a five-line row buries the next input. */
+.row-address-text {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .row-address-error {
   color: var(--danger);
 }
 
-.row-unresolved input {
+.row-is-pinned input[type="text"] {
+  /* Room for the check. */
+  padding-right: 36px;
+  border-color: #bfe5cc;
+  background: #fbfefc;
+}
+
+/* Matching `.rows input[type="text"]` on specificity - as a plain
+   `.row-unresolved input` this lost the border colour to it and showed only
+   the glow. */
+.row-unresolved input[type="text"] {
   border-color: var(--danger);
   box-shadow: 0 0 0 3px rgba(201, 42, 42, 0.12);
 }
