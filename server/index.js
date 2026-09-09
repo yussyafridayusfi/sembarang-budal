@@ -5,6 +5,8 @@ import dotenv from "dotenv";
 import locationsRouter from "./routes/locations.js";
 import placesRouter from "./routes/places.js";
 import { getStore } from "./lib/db.js";
+import { googleMapsResolverEnabled } from "./lib/sources/googleMaps.js";
+import { warmGoogleMapsCookies } from "./lib/sources/googleMapsPlace.js";
 
 dotenv.config();
 
@@ -54,6 +56,12 @@ app.use((error, req, res, next) => {
 });
 
 if (process.env.VERCEL !== "1") {
+  // The Maps listing RPC only answers in full to a cookie a few seconds old;
+  // fetch it now so the first place a person opens does not pay that wait.
+  if (googleMapsResolverEnabled()) {
+    warmGoogleMapsCookies();
+  }
+
   app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });

@@ -17,6 +17,11 @@ const imageIndex = ref(0);
 const hoursOpen = ref(false);
 const reviewTab = ref("pros");
 const showAllReviews = ref(false);
+
+/** Google's day indexes: 1 = Senin … 7 = Minggu. */
+const DAY_SHORT = ["Sen", "Sel", "Rab", "Kam", "Jum", "Sab", "Min"];
+const todayIndex = new Date().getDay() || 7;
+const popularDay = ref(todayIndex);
 const sheetElement = ref(null);
 const closeButton = ref(null);
 
@@ -30,6 +35,7 @@ watch(
     hoursOpen.value = false;
     reviewTab.value = "pros";
     showAllReviews.value = false;
+    popularDay.value = todayIndex;
   }
 );
 
@@ -156,6 +162,41 @@ const todayLine = computed(() => {
 const insights = computed(() => props.details?.insights || null);
 const hasInsights = computed(() => (insights.value?.basedOn || 0) > 0);
 
+// Popular times: one day at a time, today first.
+const popularDays = computed(() => props.details?.popularTimes?.days || []);
+const popularSelected = computed(
+  () => popularDays.value.find((day) => day.dayIndex === popularDay.value) || popularDays.value[0] || null
+);
+const popularMax = computed(() => Math.max(1, ...(popularSelected.value?.hours.map((hour) => hour.busy) || [1])));
+const currentHour = new Date().getHours();
+
+/** 5★ → 1★ rows with share of all ratings, from the listing's histogram. */
+const histogramRows = computed(() => {
+  const counts = props.details?.ratingHistogram;
+
+  if (!counts?.length) {
+    return [];
+  }
+
+  const total = counts.reduce((sum, count) => sum + count, 0) || 1;
+  return [5, 4, 3, 2, 1].map((star) => ({ star, count: counts[star - 1], pct: Math.round((counts[star - 1] / total) * 100) }));
+});
+
+const priceVotesTotal = computed(() => (props.details?.priceVotes || []).reduce((sum, vote) => sum + vote.votes, 0));
+
+const hasReviewSection = computed(
+  () =>
+    hasInsights.value ||
+    Boolean(insights.value?.summary) ||
+    histogramRows.value.length > 0 ||
+    (props.details?.reviewTopics?.length || 0) > 0 ||
+    (props.details?.reviewSnippets?.length || 0) > 0
+);
+
+function hourLabel(hour) {
+  return String(hour).padStart(2, "0");
+}
+
 const attributeRows = computed(() => {
   const attributes = props.details?.attributes || {};
 
@@ -279,10 +320,19 @@ const title = computed(() => {
             <span v-else-if="details.openNow === false" class="headline-chip closed">
               {{ details.statusText || "Closed now" }}
             </span>
+            <span v-if="details.popularTimes?.liveLabel" class="headline-chip" title="Live busyness from Google Maps">
+              📊 {{ details.popularTimes.liveLabel }}
+            </span>
             <span v-if="place?.distance" class="headline-chip" title="From the search centre">
               {{ formatDistance(place.distance) }} · 🚶 {{ walkingMinutes(place.distance) }} min · 🛵 {{ ridingMinutes(place.distance) }} min
             </span>
           </div>
+          <p v-if="details?.priceVotes?.length" class="modal-pricevotes">
+            <span v-for="vote in details.priceVotes" :key="vote.label" :title="`${vote.votes} people reported this band`">
+              {{ vote.label }} <b>{{ vote.votes }}</b>
+            </span>
+            <span class="muted">per person · reported by {{ priceVotesTotal }} people on Google Maps</span>
+          </p>
 
           <!-- Skeleton while the details load: same shape as the real body. -->
           <div v-if="loading" class="modal-body" aria-busy="true">
@@ -301,7 +351,7 @@ const title = computed(() => {
             <!-- ---------------------------------------------------------- Photos -->
             <figure v-if="activeImage" class="modal-figure">
               <div class="figure-stage">
-                <img :src="activeImage.url" :alt="activeImage.alt" loading="lazy" />
+                <img :src="activeImage.url" :alt="activeImage.alt" loading="eager" referrerpolicy="no-referrer" />
                 <button v-if="images.length > 1" type="button" class="figure-nav prev" aria-label="Previous photo" @click="nextImage(-1)">‹</button>
                 <button v-if="images.length > 1" type="button" class="figure-nav next" aria-label="Next photo" @click="nextImage(1)">›</button>
                 <span v-if="images.length > 1" class="figure-count">{{ imageIndex + 1 }} / {{ images.length }}</span>
@@ -316,7 +366,7 @@ const title = computed(() => {
                   :aria-label="`Photo ${index + 1}`"
                   @click="imageIndex = index"
                 >
-                  <img :src="image.url" :alt="image.alt" loading="lazy" />
+                  <img :src="image.thumb || image.url" :alt="image.alt" loading="lazy" referrerpolicy="no-referrer" />
                 </button>
               </div>
             </figure>
@@ -326,6 +376,8 @@ const title = computed(() => {
               No photo available.
               <template v-if="details.limitations?.length"> {{ details.limitations[0] }}</template>
             </p>
+
+            <p v-if="details.about" class="modal-about">{{ details.about }}</p>
 
             <!-- ------------------------------------------------------ Quick actions -->
             <div class="modal-quick">
@@ -337,6 +389,9 @@ const title = computed(() => {
               </a>
               <a v-if="contactEntries.find((e) => e.key === 'website')" :href="contactEntries.find((e) => e.key === 'website').href" target="_blank" rel="noopener noreferrer" class="quick-btn">
                 <span aria-hidden="true">🌐</span> Website
+              </a>
+              <a v-if="details.orderLinks?.length" :href="details.orderLinks[0].url" target="_blank" rel="noopener noreferrer" class="quick-btn">
+                <span aria-hidden="true">🛵</span> {{ details.orderLinks[0].label }}
               </a>
               <a :href="details.links.googleMaps" target="_blank" rel="noopener noreferrer" class="quick-btn">
                 <span aria-hidden="true">🗺️</span> Google Maps
@@ -364,8 +419,64 @@ const title = computed(() => {
               </ul>
             </section>
 
+            <!-- ---------------------------------------------------- Popular times -->
+            <section v-if="popularDays.length" class="modal-section">
+              <h3>
+                Popular times
+                <span class="section-note">Google Maps · from visits</span>
+              </h3>
+              <div class="day-tabs" role="tablist" aria-label="Day">
+                <button
+                  v-for="day in popularDays"
+                  :key="day.dayIndex"
+                  type="button"
+                  role="tab"
+                  :aria-selected="day.dayIndex === popularSelected?.dayIndex"
+                  :class="{ active: day.dayIndex === popularSelected?.dayIndex, today: day.dayIndex === todayIndex }"
+                  @click="popularDay = day.dayIndex"
+                >
+                  {{ DAY_SHORT[day.dayIndex - 1] }}
+                </button>
+              </div>
+              <div v-if="popularSelected" class="busy-chart" role="img" :aria-label="`Busyness by hour on ${DAY_SHORT[popularSelected.dayIndex - 1]}`">
+                <span
+                  v-for="hour in popularSelected.hours"
+                  :key="hour.hour"
+                  class="busy-bar"
+                  :class="{ now: popularSelected.dayIndex === todayIndex && hour.hour === currentHour, closed: !hour.busy }"
+                  :style="{ '--h': `${Math.round((hour.busy / popularMax) * 100)}%` }"
+                  :title="`${hourLabel(hour.hour)}:00 · ${hour.label || (hour.busy ? hour.busy + '%' : 'closed')}`"
+                >
+                  <i></i>
+                  <b v-if="hour.hour % 3 === 0">{{ hourLabel(hour.hour) }}</b>
+                </span>
+              </div>
+              <p v-if="popularSelected?.waitText" class="busy-wait">⏱️ {{ popularSelected.waitText }}</p>
+            </section>
+
+            <!-- ------------------------------------------------------- Facilities -->
+            <section v-if="details.attributeGroups?.length" class="modal-section">
+              <h3>
+                Facilities &amp; options
+                <span class="section-note">Google Maps listing</span>
+              </h3>
+              <div v-for="group in details.attributeGroups" :key="group.id || group.label" class="attr-group">
+                <span class="attr-group-label">{{ group.label }}</span>
+                <span
+                  v-for="item in group.items"
+                  :key="item.id || item.label"
+                  class="attr-chip"
+                  :class="{ no: item.value === false }"
+                  :title="item.sentence || ''"
+                >
+                  <span aria-hidden="true">{{ item.value === false ? "✕" : "✓" }}</span>
+                  {{ item.answer ? `${item.label}: ${item.answer}` : item.label }}
+                </span>
+              </div>
+            </section>
+
             <!-- --------------------------------------------------- From reviews -->
-            <section v-if="hasInsights || insights?.summary" class="modal-section">
+            <section v-if="hasReviewSection" class="modal-section">
               <h3>
                 What reviewers say
                 <span class="section-note">
@@ -374,7 +485,27 @@ const title = computed(() => {
                 </span>
               </h3>
 
-              <p v-if="insights.summary" class="review-summary">{{ insights.summary }}</p>
+              <p v-if="insights?.summary" class="review-summary">{{ insights.summary }}</p>
+
+              <div v-if="histogramRows.length || details.reviewTopics?.length" class="review-overview">
+                <ul v-if="histogramRows.length" class="histogram" aria-label="Rating distribution">
+                  <li v-for="row in histogramRows" :key="row.star">
+                    <span class="h-star">{{ row.star }}★</span>
+                    <span class="h-track"><i :style="{ width: `${row.pct}%` }"></i></span>
+                    <span class="h-count">{{ formatCount(row.count) }}</span>
+                  </li>
+                </ul>
+                <div v-if="details.reviewTopics?.length" class="topic-chips">
+                  <span class="pane-title">Reviewers mention</span>
+                  <span v-for="topic in details.reviewTopics" :key="topic.label" class="attr-chip">
+                    {{ topic.label }} <b>{{ topic.count }}</b>
+                  </span>
+                </div>
+              </div>
+
+              <blockquote v-for="snippet in (details.reviewSnippets || []).slice(0, 3)" :key="snippet" class="review-quote highlight">
+                “{{ snippet }}”<cite> — Google Maps highlight</cite>
+              </blockquote>
 
               <div v-if="hasInsights" class="review-tabs" role="tablist">
                 <button type="button" role="tab" :aria-selected="reviewTab === 'pros'" :class="{ active: reviewTab === 'pros' }" @click="reviewTab = 'pros'">
@@ -433,6 +564,17 @@ const title = computed(() => {
                       <span><template v-if="review.rating"><span class="stars">{{ stars(review.rating) }}</span> · </template>{{ review.relativeTime }}</span>
                     </p>
                     <p class="review-text">{{ review.text }}</p>
+                    <div v-if="review.photos?.length" class="review-photos">
+                      <img
+                        v-for="photo in review.photos"
+                        :key="photo"
+                        :src="photo"
+                        :alt="`Photo by ${review.author}`"
+                        loading="lazy"
+                        referrerpolicy="no-referrer"
+                      />
+                    </div>
+                    <p v-if="review.ownerReply" class="owner-reply"><strong>Owner reply</strong> {{ review.ownerReply }}</p>
                   </li>
                 </ul>
                 <button v-if="details.reviews.length > 2" type="button" class="link-btn" @click="showAllReviews = !showAllReviews">
@@ -444,8 +586,9 @@ const title = computed(() => {
             <!-- Stated plainly rather than filled in with invented text. -->
             <p v-else class="modal-unknown">
               <template v-if="details.rating !== null">
-                Google shows a {{ details.rating.toFixed(1) }} rating from {{ formatCount(details.reviewCount) }} people, but
-                review text, price and photos need <code>GOOGLE_PLACES_API_KEY</code>.
+                Google shows a {{ details.rating.toFixed(1) }} rating<template v-if="details.reviewCount !== null"> from {{ formatCount(details.reviewCount) }} people</template>,
+                but its listing gave no review text.
+                <template v-if="details.limitations?.length"> {{ details.limitations[0] }}</template>
               </template>
               <template v-else-if="details.unnamed">
                 This place has no name in OpenStreetMap, so nothing more can be looked up.
@@ -493,6 +636,7 @@ const title = computed(() => {
             <section v-if="details.address" class="modal-section">
               <h3>Address</h3>
               <p class="modal-address">{{ details.address }}</p>
+              <p v-if="details.locatedIn?.name" class="modal-address muted">Inside {{ details.locatedIn.name }}</p>
               <p v-if="details.google?.plusCode" class="modal-address muted">Plus code {{ details.google.plusCode }}</p>
               <div class="modal-inline-actions">
                 <button type="button" class="link-btn" @click="copy(details.address, 'address')">

@@ -345,10 +345,18 @@ export function analyzeReviews(reviews = [], { reviewCount = null, googleSummary
 /**
  * The "at a glance" grid. Each cell is `{ value, source, note }` or null, and
  * the source is the truth about where it came from, in priority order:
- * Google's structured attribute, then an OSM tag, then a count of review
- * mentions. The panel prints the source next to the value.
+ * Google's structured attribute (Places API, then the public Maps listing),
+ * then an OSM tag, then a count of review mentions. The panel prints the
+ * source next to the value.
+ *
+ * `maps` is the listing's attribute groups reduced to label lists -
+ * `{ atmosphere: [], parking: [], payment: [], crowd: [], waiting: "" }` - as
+ * `placeDetails` prepares them.
  */
-export function buildAttributes({ google = null, osmTags = {}, insights = null } = {}) {
+export function buildAttributes({ google = null, maps = null, osmTags = {}, insights = null } = {}) {
+  const fromMaps = (labels, note = "Google Maps listing") =>
+    labels?.length ? { value: labels.join(", "), source: "google-maps", note } : null;
+
   const fromReviews = (finding, extra = "") =>
     finding
       ? {
@@ -373,6 +381,8 @@ export function buildAttributes({ google = null, osmTags = {}, insights = null }
 
   if (atmos.length) {
     atmosphere = { value: atmos.join(", "), source: "google", note: "Google place attributes" };
+  } else if (maps?.atmosphere?.length) {
+    atmosphere = fromMaps(maps.atmosphere);
   } else if (osmTags.outdoor_seating === "yes") {
     atmosphere = { value: "outdoor seating", source: "osm", note: "OpenStreetMap tag" };
   } else if (insights?.praise?.some((p) => p.label === "Good atmosphere")) {
@@ -384,6 +394,8 @@ export function buildAttributes({ google = null, osmTags = {}, insights = null }
 
   if (google?.attributes?.parking?.length) {
     parkingCell = { value: google.attributes.parking.join(", "), source: "google", note: "Google place attributes" };
+  } else if (maps?.parking?.length) {
+    parkingCell = fromMaps(maps.parking);
   } else if (osmTags.parking) {
     parkingCell = { value: String(osmTags.parking).replace(/_/g, " "), source: "osm", note: "OpenStreetMap tag" };
   } else {
@@ -397,14 +409,22 @@ export function buildAttributes({ google = null, osmTags = {}, insights = null }
 
   if (google?.attributes?.payment?.length) {
     paymentCell = { value: google.attributes.payment.join(", "), source: "google", note: "Google place attributes" };
+  } else if (maps?.payment?.length) {
+    paymentCell = fromMaps(maps.payment);
   } else if (osmPayments.length) {
     paymentCell = { value: osmPayments.join(", "), source: "osm", note: "OpenStreetMap tags" };
   } else {
     paymentCell = fromReviews(insights?.payment);
   }
 
-  const crowdCell = fromReviews(insights?.crowd);
-  const waitingCell = fromReviews(insights?.waitingTime);
+  // Google's "Tipe pengunjung" is who actually goes there; a review count
+  // saying "crowded" is a different fact, and comes second.
+  const crowdCell = fromMaps(maps?.crowd, "Google Maps · who visits") || fromReviews(insights?.crowd);
+  // The waiting-time sentence comes off Google's popular-times data, which is
+  // measured from visits, so it outranks a handful of review mentions.
+  const waitingCell = maps?.waiting
+    ? { value: maps.waiting, source: "google-maps", note: "from popular times" }
+    : fromReviews(insights?.waitingTime);
   const locationCell = fromReviews(insights?.findability);
 
   const popularityCell = insights?.popularity

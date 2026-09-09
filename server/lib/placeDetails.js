@@ -3,6 +3,7 @@ import { reverseGeocode } from "./sources/nominatim.js";
 import { fetchJson } from "./http.js";
 import { describeTags, getCategory } from "./categories.js";
 import { fetchGoogleMapsCard, googleMapsResolverEnabled } from "./sources/googleMaps.js";
+import { fetchGoogleMapsListing } from "./sources/googleMapsPlace.js";
 import {
   fetchPlaceByPlaceId,
   googlePlacesApiEnabled,
@@ -30,11 +31,16 @@ import { analyzeReviews, buildAttributes } from "./reviewInsights.js";
  *    one cached request, but only accepted when it lands within 300 m of the
  *    place *and* shares its name - the wrong card with a real source label is
  *    exactly the kind of fabrication bug 11 removed.
- * 3. Google Places API (`googlePlacesApi.js`) - photos, price, review text,
- *    Google's review summary and structured attributes. Keyed, optional.
- * 4. Review analysis (`reviewInsights.js`) - pros, cons, complaints, best
+ * 3. The public Google Maps listing (`sources/googleMapsPlace.js`), keyed by
+ *    the card's feature id - photos, price range, up to eight review texts,
+ *    Google's pull-quotes and review topics, the attribute groups (service
+ *    options, atmosphere, crowd, payments, parking…), popular times with
+ *    waiting-time sentences. Free and keyless; one cached request per place.
+ * 4. Google Places API (`googlePlacesApi.js`) - the same fields from the
+ *    official, keyed API. Optional; wins over (3) where both have a value.
+ * 5. Review analysis (`reviewInsights.js`) - pros, cons, complaints, best
  *    menu, waiting time, crowd, parking, payment, findability - counted from
- *    the review texts in (3), and labelled with how many reviews said so.
+ *    the review texts in (3)/(4), and labelled with how many reviews said so.
  *
  * `null` throughout means "we genuinely do not know"; the UI renders it as such.
  */
@@ -207,6 +213,98 @@ export function isStreetLikeName(name) {
 /** Google's Indonesian day names, as the embed card labels them. */
 const DAY_LABELS = { 1: "Senin", 2: "Selasa", 3: "Rabu", 4: "Kamis", 5: "Jumat", 6: "Sabtu", 7: "Minggu" };
 
+/**
+ * Open-now and the status line, computed from the weekly table at request
+ * time. The card and the listing are cached for days, so the "Buka · Tutup
+ * pukul 23.00" they were fetched with would otherwise be shown at midnight.
+ * Times are read in the place's zone (Indonesian places, Asia/Jakarta unless
+ * the listing said otherwise); a table with fewer than seven days is not
+ * trusted and yields null.
+ */
+export function openStateFromHours(hours, { timeZone = "Asia/Jakarta", now = new Date() } = {}) {
+  if (!Array.isArray(hours) || hours.length < 7) {
+    return null;
+  }
+
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).formatToParts(now);
+  const weekday = parts.find((part) => part.type === "weekday")?.value || "";
+  const hour = Number(parts.find((part) => part.type === "hour")?.value);
+  const minute = Number(parts.find((part) => part.type === "minute")?.value);
+  const todayIndex = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 }[weekday];
+
+  if (!todayIndex || !Number.isFinite(hour) || !Number.isFinite(minute)) {
+    return null;
+  }
+
+  const nowMinutes = (hour % 24) * 60 + minute;
+  const fmt = (minutes) => {
+    const m = ((minutes % 1440) + 1440) % 1440;
+    return `${String(Math.floor(m / 60)).padStart(2, "0")}.${String(m % 60).padStart(2, "0")}`;
+  };
+
+  /** "10.00–23.00, 01.00–03.00" → [[600, 1380], [60, 180]]; "Buka 24 jam" → [[0, 1440]]. */
+  const rangesFor = (dayIndex) => {
+    const entry = hours.find((day) => Number(day.dayIndex) === dayIndex);
+    const text = String(entry?.text || "");
+
+    if (/24 jam|24 hours/i.test(text)) {
+      return [[0, 1440]];
+    }
+
+    return [...text.matchAll(/(\d{1,2})[.:](\d{2})\s*[–-]\s*(\d{1,2})[.:](\d{2})/g)].map((m) => {
+      const start = Number(m[1]) * 60 + Number(m[2]);
+      let end = Number(m[3]) * 60 + Number(m[4]);
+
+      if (end <= start) {
+        end += 1440; // closes after midnight
+      }
+
+      return [start, end];
+    });
+  };
+
+  const yesterdayIndex = todayIndex === 1 ? 7 : todayIndex - 1;
+
+  // Still inside a range that started yesterday and runs past midnight?
+  for (const [start, end] of rangesFor(yesterdayIndex)) {
+    if (end > 1440 && nowMinutes < end - 1440) {
+      return { openNow: true, statusText: `Buka · Tutup pukul ${fmt(end)}` };
+    }
+  }
+
+  const today = rangesFor(todayIndex).sort((a, b) => a[0] - b[0]);
+
+  for (const [start, end] of today) {
+    if (nowMinutes >= start && nowMinutes < end) {
+      return { openNow: true, statusText: end - start >= 1440 ? "Buka 24 jam" : `Buka · Tutup pukul ${fmt(end)}` };
+    }
+  }
+
+  const nextToday = today.find(([start]) => start > nowMinutes);
+
+  if (nextToday) {
+    return { openNow: false, statusText: `Tutup · Buka pukul ${fmt(nextToday[0])}` };
+  }
+
+  for (let offset = 1; offset <= 7; offset += 1) {
+    const dayIndex = ((todayIndex - 1 + offset) % 7) + 1;
+    const ranges = rangesFor(dayIndex).sort((a, b) => a[0] - b[0]);
+
+    if (ranges.length) {
+      const dayLabel = offset === 1 ? "besok" : DAY_LABELS[dayIndex];
+      return { openNow: false, statusText: `Tutup · Buka ${dayLabel} pukul ${fmt(ranges[0][0])}` };
+    }
+  }
+
+  return { openNow: false, statusText: "Tutup" };
+}
+
 function hoursFromCard(card) {
   if (!card?.openingHours?.length) {
     return [];
@@ -329,6 +427,22 @@ export async function buildPlaceDetails({ id, lat, lng, name, type, googleId = "
     }
   }
 
+  // --- Google Maps listing: photos, price, reviews, attributes, busy times --
+  // Needs the feature id, which only the card (or a Google-resolved
+  // suggestion) carries. An unnamed place never gets here.
+  let maps = null;
+  let mapsError = "";
+  const featureId = card?.googleId || googleId;
+
+  if (googleMapsResolverEnabled() && featureId) {
+    try {
+      maps = await fetchGoogleMapsListing({ googleId: featureId, lat: resolved.lat, lng: resolved.lng });
+    } catch (error) {
+      mapsError = error.message || "request failed";
+      console.warn(`[details] Google Maps listing failed: ${mapsError}`);
+    }
+  }
+
   // --- Google Places API: photos, price, reviews, attributes ---------------
   let google = null;
 
@@ -350,9 +464,11 @@ export async function buildPlaceDetails({ id, lat, lng, name, type, googleId = "
 
   const contacts = {
     phone: normalizePhone(
-      google?.phone || card?.phone || firstTag(tags, ["phone", "contact:phone", "contact:mobile"])
+      google?.phone || maps?.phone || card?.phone || firstTag(tags, ["phone", "contact:phone", "contact:mobile"])
     ),
-    website: normalizeWebsite(google?.website || card?.website || firstTag(tags, ["website", "contact:website", "url"])),
+    website: normalizeWebsite(
+      google?.website || maps?.website || card?.website || firstTag(tags, ["website", "contact:website", "url"])
+    ),
     instagram: normalizeInstagram(firstTag(tags, ["contact:instagram", "instagram"])),
     facebook: normalizeWebsite(firstTag(tags, ["contact:facebook", "facebook"])),
     email: firstTag(tags, ["email", "contact:email"])
@@ -369,61 +485,109 @@ export async function buildPlaceDetails({ id, lat, lng, name, type, googleId = "
     });
   });
 
+  // Listing photos are plain googleusercontent URLs; the size suffix is ours
+  // to choose, so they go straight to the browser.
+  (maps?.photos || []).forEach((photo, index) => {
+    images.push({
+      url: photo.url,
+      thumb: photo.thumb,
+      alt: photo.caption || `${resolved.name} photo ${index + 1}`,
+      credit: "Google Maps"
+    });
+  });
+
   const category = getCategory(resolved.categoryId);
 
-  const reviews = (google?.reviews || []).slice(0, 5);
-  const rating = google?.rating ?? card?.rating ?? null;
-  const reviewCount = google?.reviewCount ?? card?.reviewCount ?? null;
+  // The API's five review texts when a key is set, else the listing's eight.
+  const reviews = google?.reviews?.length ? google.reviews.slice(0, 5) : (maps?.reviews || []).slice(0, 8);
+  const rating = google?.rating ?? maps?.rating ?? card?.rating ?? null;
+  const reviewCount = google?.reviewCount ?? maps?.reviewCount ?? card?.reviewCount ?? null;
 
   const insights = analyzeReviews(reviews, {
     reviewCount,
     googleSummary: google?.summary?.reviews || google?.summary?.generative || google?.summary?.editorial || ""
   });
 
-  const attributes = buildAttributes({ google, osmTags: tags, insights });
+  // The listing's attribute groups, reduced to the labels the glance grid
+  // shows. `value === true` and chosen answers only - a "no" is not a feature.
+  const groupLabels = (id) =>
+    (maps?.attributeGroups || [])
+      .filter((group) => group.id === id)
+      .flatMap((group) => group.items)
+      .filter((item) => item.value === true || item.answer)
+      .map((item) => item.answer || item.label);
 
-  // Hours: the API's localised weekday text, else the card's weekly table,
-  // else the raw OSM opening_hours string.
+  const todayIndex = new Date().getDay() || 7;
+  const mapsAttributes = maps
+    ? {
+        atmosphere: groupLabels("atmosphere"),
+        parking: groupLabels("parking"),
+        payment: groupLabels("payments"),
+        crowd: groupLabels("crowd"),
+        waiting:
+          maps.popularTimes?.days.find((day) => day.dayIndex === todayIndex)?.waitText ||
+          maps.popularTimes?.days.find((day) => day.waitText)?.waitText ||
+          ""
+      }
+    : null;
+
+  const attributes = buildAttributes({ google, maps: mapsAttributes, osmTags: tags, insights });
+
+  // Hours: the API's localised weekday text, else the listing's or the card's
+  // weekly table (same data), else the raw OSM opening_hours string.
   const openingHours = google?.openingHours?.length
     ? google.openingHours
-    : card?.openingHours?.length
-      ? hoursFromCard(card)
-      : tags.opening_hours
-        ? [tags.opening_hours]
-        : [];
+    : maps?.openingHours?.length >= 7
+      ? hoursFromCard({ openingHours: maps.openingHours })
+      : card?.openingHours?.length
+        ? hoursFromCard(card)
+        : tags.opening_hours
+          ? [tags.opening_hours]
+          : [];
 
-  const openNow = google?.openNow ?? card?.openNow ?? null;
+  // Computed now from the weekly table when we hold one; the cached status
+  // line is only a fallback.
+  const weeklyTable = maps?.openingHours?.length >= 7 ? maps.openingHours : card?.openingHours?.length >= 7 ? card.openingHours : null;
+  const openState = weeklyTable ? openStateFromHours(weeklyTable) : null;
+  const openNow = google?.openNow ?? openState?.openNow ?? maps?.openNow ?? card?.openNow ?? null;
+  const priceRange = google?.priceRange || maps?.price?.label || null;
 
   /** Where each headline field came from, for the UI to print beside it. */
   const provenance = {
-    rating: google?.rating != null ? "google-places" : card?.rating != null ? "google-maps" : null,
-    reviewCount: google?.reviewCount != null ? "google-places" : card?.reviewCount != null ? "google-maps" : null,
-    price: google?.priceRange || google?.priceLevel ? "google-places" : null,
+    rating: google?.rating != null ? "google-places" : rating != null ? "google-maps" : null,
+    reviewCount: google?.reviewCount != null ? "google-places" : reviewCount != null ? "google-maps" : null,
+    price: google?.priceRange || google?.priceLevel ? "google-places" : maps?.price ? "google-maps" : null,
     hours: google?.openingHours?.length
       ? "google-places"
-      : card?.openingHours?.length
+      : maps?.openingHours?.length >= 7 || card?.openingHours?.length
         ? "google-maps"
         : tags.opening_hours
           ? "osm"
           : null,
-    phone: google?.phone ? "google-places" : card?.phone ? "google-maps" : contacts.phone ? "osm" : null,
-    website: google?.website ? "google-places" : card?.website ? "google-maps" : contacts.website ? "osm" : null,
-    photos: google?.photos?.length ? "google-places" : images.length ? "osm" : null,
-    reviews: reviews.length ? "google-places" : null
+    phone: google?.phone ? "google-places" : maps?.phone || card?.phone ? "google-maps" : contacts.phone ? "osm" : null,
+    website: google?.website
+      ? "google-places"
+      : maps?.website || card?.website
+        ? "google-maps"
+        : contacts.website
+          ? "osm"
+          : null,
+    photos: google?.photos?.length ? "google-places" : maps?.photos?.length ? "google-maps" : images.length ? "osm" : null,
+    reviews: google?.reviews?.length ? "google-places" : reviews.length ? "google-maps" : null
   };
 
   const dataSources = [
     "OpenStreetMap",
     ...(resolved.address && !stored?.address ? ["Nominatim"] : []),
-    ...(card ? ["Google Maps"] : []),
+    ...(card || maps ? ["Google Maps"] : []),
     ...(google ? ["Google Places API"] : []),
     ...(images.some((image) => image.credit === "Wikimedia Commons") ? ["Wikimedia Commons"] : [])
   ].filter((value, index, list) => list.indexOf(value) === index);
 
   const detail = {
     id: resolved.id,
-    name: google?.name || card?.name || resolved.name,
-    address: google?.address || card?.address || resolved.address || "",
+    name: google?.name || maps?.name || card?.name || resolved.name,
+    address: google?.address || maps?.address || card?.address || resolved.address || "",
     coordinates: { lat: resolved.lat, lng: resolved.lng },
     categoryId: resolved.categoryId,
     categoryLabel: category?.label || "Other",
@@ -456,16 +620,29 @@ export async function buildPlaceDetails({ id, lat, lng, name, type, googleId = "
     rating,
     reviewCount,
     priceLevel: google?.priceLevel || null,
-    priceRange: google?.priceRange || null,
+    priceRange,
+    // How many people reported each price band, straight off the listing.
+    priceVotes: maps?.price?.votes || [],
     reviews,
+    ratingHistogram: maps?.ratingHistogram || null,
+    // Google's own pull-quotes and the topics reviewers keep raising.
+    reviewSnippets: maps?.snippets || [],
+    reviewTopics: maps?.topics || [],
+    // Every attribute group Google shows ("Opsi layanan", "Suasana", …),
+    // including explicit "no"s, for the facilities section.
+    attributeGroups: maps?.attributeGroups || [],
+    popularTimes: maps?.popularTimes || null,
+    about: google?.summary?.editorial || maps?.editorial || maps?.about || "",
+    locatedIn: maps?.locatedIn || null,
+    orderLinks: maps?.orderLinks || [],
     openingHours,
     openNow,
-    statusText: card?.statusText || "",
-    google: card || google
+    statusText: (google?.openNow == null && openState?.statusText) || maps?.statusText || card?.statusText || "",
+    google: card || google || maps
       ? {
-          placeId: google?.placeId || card?.placeId || placeId || "",
-          googleId: card?.googleId || googleId || "",
-          categoryLabel: card?.categoryLabel || "",
+          placeId: google?.placeId || maps?.placeId || card?.placeId || placeId || "",
+          googleId: maps?.googleId || card?.googleId || googleId || "",
+          categoryLabel: maps?.categoryLabels?.[0] || card?.categoryLabel || "",
           plusCode: card?.plusCode || ""
         }
       : null,
@@ -474,23 +651,30 @@ export async function buildPlaceDetails({ id, lat, lng, name, type, googleId = "
     provenance,
     dataSources,
     hasRichData:
-      Boolean(google) || Boolean(card) || images.length > 0 || Object.values(contacts).some(Boolean),
+      Boolean(google) || Boolean(maps) || Boolean(card) || images.length > 0 || Object.values(contacts).some(Boolean),
     // What is missing and why, so the panel can say it in one honest line.
     limitations: [
-      ...(!googlePlacesApiEnabled()
-        ? ["Photos, price, review text and Google's parking/payment attributes need GOOGLE_PLACES_API_KEY."]
+      ...(card && (!maps || maps.thin) && !google
+        ? [
+            mapsError
+              ? `The place's Google Maps listing could not be read (${mapsError}); photos, price and reviews may be missing.`
+              : "Google served a trimmed version of this place's listing; photos, price and reviews may be missing. Open it again in a moment."
+          ]
         : []),
       ...(unnamed && !google?.name
         ? [
             "This place has no name in OpenStreetMap - it is shown by its street - so there is nothing to look up. If you know it, add its name on OpenStreetMap."
           ]
         : []),
-      ...(googleMapsResolverEnabled() && !card && !unnamed
+      ...(googleMapsResolverEnabled() && !card && !maps && !unnamed
         ? [
             cardError
               ? `Google Maps could not be reached for this place (${cardError}); rating, hours and contact may be missing.`
-              : "No Google Maps card matched this place closely enough to trust."
+              : "No Google Maps listing matched this place closely enough to trust, so only OpenStreetMap data is shown."
           ]
+        : []),
+      ...(!googleMapsResolverEnabled() && !googlePlacesApiEnabled()
+        ? ["Google Maps lookups are switched off (GOOGLE_MAPS_RESOLVER=0); only OpenStreetMap data is shown."]
         : [])
     ]
   };
