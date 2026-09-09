@@ -30,6 +30,7 @@ const emit = defineEmits([
   "hover-place",
   "pick-center",
   "area-changed",
+  "view-changed",
   "update:radius",
   "use-my-location"
 ]);
@@ -467,6 +468,22 @@ onMounted(() => {
   // stray drag never spends a request.
   map.on("moveend", () => {
     animating = false;
+
+    // Where the person is looking, for biasing text searches before any
+    // centre has been chosen.
+    const view = map.getCenter();
+    const bounds = map.getBounds();
+    emit("view-changed", {
+      lat: view.lat,
+      lng: view.lng,
+      zoom: map.getZoom(),
+      bounds: {
+        minLat: bounds.getSouth(),
+        minLng: bounds.getWest(),
+        maxLat: bounds.getNorth(),
+        maxLng: bounds.getEast()
+      }
+    });
 
     if (pendingPlaces) {
       drawPlaces();
