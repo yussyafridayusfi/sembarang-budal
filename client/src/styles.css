@@ -2069,6 +2069,10 @@ ul.notice.warn {
     "icon label"
     "icon value"
     "icon source";
+  /* Cells stretch to the tallest in their row; without this the spare height
+     is shared between the three rows and the label floats away from its
+     value. */
+  align-content: start;
   gap: 1px 6px;
   padding: 9px 10px;
   border: 1px solid var(--border);
@@ -2420,19 +2424,64 @@ ul.notice.warn {
 /* ---------------------------------------------------------------------------
    Detail sheet: data read off the place's public Google Maps listing.
    --------------------------------------------------------------------------- */
-.modal-pricevotes {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 10px;
-  margin: 6px 0 0;
-  padding: 0 18px;
-  font-size: 0.74rem;
+/* Price per person: the typical band, then how the reports spread. */
+.price-lead {
+  margin: 0 0 8px;
+  font-size: 0.84rem;
   color: var(--text-soft);
 }
 
-.modal-pricevotes b {
+.price-lead strong {
+  font-size: 0.92rem;
+  color: var(--text);
+}
+
+.price-bands {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.price-bands li {
+  display: grid;
+  grid-template-columns: auto minmax(40px, 1fr) 34px;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.73rem;
+  line-height: 1.8;
+  color: var(--text-soft);
+}
+
+.price-bands li.top {
   font-weight: 600;
   color: var(--text);
+}
+
+.price-band-label {
+  white-space: nowrap;
+}
+
+.price-track {
+  height: 6px;
+  background: var(--panel-soft);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.price-track i {
+  display: block;
+  height: 100%;
+  background: rgba(25, 113, 194, 0.35);
+  border-radius: 999px;
+}
+
+.price-bands li.top .price-track i {
+  background: var(--accent);
+}
+
+.price-band-pct {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .modal-about {

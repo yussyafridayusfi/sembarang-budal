@@ -250,6 +250,26 @@ const histogramRows = computed(() => {
 
 const priceVotesTotal = computed(() => (props.details?.priceVotes || []).reduce((sum, vote) => sum + vote.votes, 0));
 
+/** Google's price bands as shares of everyone who reported a spend. */
+const priceBands = computed(() => {
+  const total = priceVotesTotal.value;
+
+  if (!total) {
+    return [];
+  }
+
+  return (props.details?.priceVotes || []).map((vote) => ({
+    label: vote.label,
+    votes: vote.votes,
+    pct: Math.round((vote.votes / total) * 100)
+  }));
+});
+
+/** The band most people reported - the answer to "what will this cost me". */
+const topPriceBand = computed(() =>
+  priceBands.value.reduce((best, band) => (!best || band.votes > best.votes ? band : best), null)
+);
+
 const hasReviewSection = computed(
   () =>
     hasInsights.value ||
@@ -393,12 +413,6 @@ const title = computed(() => {
               {{ formatDistance(place.distance) }} · 🚶 {{ walkingMinutes(place.distance) }} min · 🛵 {{ ridingMinutes(place.distance) }} min
             </span>
           </div>
-          <p v-if="details?.priceVotes?.length" class="modal-pricevotes">
-            <span v-for="vote in details.priceVotes" :key="vote.label" :title="`${vote.votes} people reported this band`">
-              {{ vote.label }} <b>{{ vote.votes }}</b>
-            </span>
-            <span class="muted">per person · reported by {{ priceVotesTotal }} people on Google Maps</span>
-          </p>
 
           <!-- Skeleton while the details load: same shape as the real body. -->
           <div v-if="loading" class="modal-body" aria-busy="true">
@@ -463,6 +477,29 @@ const title = computed(() => {
                 <span aria-hidden="true">🗺️</span> Google Maps
               </a>
             </div>
+
+            <!-- -------------------------------------------------- Price per person -->
+            <section v-if="priceBands.length" class="modal-section">
+              <h3>
+                Price per person
+                <span class="section-note">Google Maps · {{ formatCount(priceVotesTotal) }} people reported what they spent</span>
+              </h3>
+              <p class="price-lead">
+                Most people spend <strong>{{ topPriceBand.label }}</strong>
+              </p>
+              <ul class="price-bands">
+                <li
+                  v-for="band in priceBands"
+                  :key="band.label"
+                  :class="{ top: band.label === topPriceBand.label }"
+                  :title="`${formatCount(band.votes)} of ${formatCount(priceVotesTotal)} people`"
+                >
+                  <span class="price-band-label">{{ band.label }}</span>
+                  <span class="price-track"><i :style="{ width: `${band.pct}%` }"></i></span>
+                  <span class="price-band-pct">{{ band.pct }}%</span>
+                </li>
+              </ul>
+            </section>
 
             <!-- ------------------------------------------------------ At a glance -->
             <section class="modal-section">
