@@ -552,6 +552,7 @@ value names its source, and anything we do not know says so.
 | Popular times (per day, per hour, live "not too busy") | Maps listing | no |
 | Facilities & options (every attribute group, incl. explicit "no"s) | Maps listing | no |
 | "Inside Royal Plaza", order-online link, about text | Maps listing | no |
+| Videos (top 3) | YouTube results page (`sources/videos.js`), filtered by name relevance; TikTok / Instagram as search links | no |
 
 **The Maps listing, and how it is read for free.** The detail panel used to
 stop at the embed card and say that photos, price and reviews needed
@@ -639,6 +640,74 @@ plus code, address, OSM facts, and popularity; the at-a-glance grid reports
 "not enough data" for the rest and one line says what a key would add.
 
 ---
+
+### Videos about a place
+
+The sheet's **Videos** section shows up to three YouTube videos - ordinary
+uploads and Shorts - about the place, each with thumbnail, title, channel,
+views and age, opening on YouTube. They come from the public results page,
+whose `ytInitialData` lists `videoRenderer` and `shortsLockupViewModel`
+entries for the query "<name> <kecamatan> <kabupaten>". Two rules keep it
+honest:
+
+- **Relevance, not presence.** A search for a small warung also returns generic
+  "kuliner Sidoarjo" videos. Candidates go through the same
+  `filterByRelevance` the geocoders use, so a video has to name the place, and
+  among those the title that names more of the place and its area ranks first
+  (the Gedangan branch over the Semarang one, the outlet over the brand
+  documentary).
+- **Instagram and TikTok are links, not scraped content.** Instagram redirects
+  every search to its login page; TikTok renders results client-side behind a
+  signed API. The sheet says so and offers a one-tap search on each instead of
+  pretending.
+
+Cached three days per query; the sheet loads videos after the details so a slow
+YouTube never delays the rest.
+
+### Meeting point: every location must be on the map
+
+"Save locations" used to send whatever was typed and let the server drop the
+rows it could not geocode, reporting them afterwards in a small warning while
+the midpoint was computed from the rest. Now the panel resolves each typed row
+itself before saving: a row never picked from the list is looked up, accepted
+only when the match shares the typed name's tokens (the server relaxes
+addresses, so an unknown street can come back as the whole village), and shown
+with its resolved address. A row that cannot be placed is marked in red with
+"Not found on the map - pick a suggestion, paste a Maps link, or type lat,lng",
+a role="alert" notice names every such row, and nothing is saved until they are
+fixed.
+
+### Installable on a phone
+
+The app was already responsive (bottom sheet, 720 px breakpoint) and had a
+service worker; it is now a proper installable PWA:
+
+- real PNG icons (192, 512, a maskable 512 and a 180 apple-touch-icon), drawn by
+  a small script with no image dependencies, next to the SVGs;
+- a manifest with `id`, `scope`, `display_override`, categories and two
+  shortcuts ("Search near me" opens on the device's location, "Meet up" opens
+  the meeting-point panel), handled by `App.vue` from the launch query string;
+- Apple meta tags and `viewport-fit=cover`, with `env(safe-area-inset-bottom)`
+  padding on the sheet and the detail modal for phones with a home indicator;
+- an **Install** button in the header that appears only while the browser
+  offers `beforeinstallprompt`, and disappears once installed or when running
+  standalone.
+
+### Quality gate: aislop
+
+`npm run slop` runs [aislop](https://github.com/scanaislop/aislop) - a scanner
+for the patterns coding agents leave behind (narrative comments, swallowed
+exceptions, useless fallbacks, dead code, oversized functions) on top of lint,
+complexity and security checks. The first run scored the project 43/100, almost
+entirely from the built bundle in `docs/` being scanned as source and from a
+handful of genuine findings: useless `|| {}` spread fallbacks, `new Array(n)`,
+an unused variable, a thin wrapper function, two "used to be" comments, and
+`buildPlaceDetails` at 373 lines. The bundle is excluded in
+`.aislop/config.yml`, the findings are fixed, and the details builder is split
+into `resolvePlaceRecord` / `enrichPlaceRecord` / `buildLinks` /
+`buildLimitations`. Two rules are turned off deliberately and the config says
+why: public documentation links are product, not deployment config, and the
+server's console logging is intentional.
 
 ### A maps-app UI
 

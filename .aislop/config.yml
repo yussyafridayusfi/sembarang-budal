@@ -1,0 +1,21 @@
+# aislop - quality gate for code written with coding agents.
+# Run `npm run slop` for the report, `npm run slop:fix` for the mechanical fixes.
+
+exclude:
+  # Built bundles: docs/ is the GitHub Pages copy of dist/, not source.
+  - docs
+  - dist
+  # Local place cache and tool state.
+  - data
+  - .claude
+
+rules:
+  # Public documentation links (OpenStreetMap edit pages, Google Maps deep
+  # links) are part of the product, not deployment config.
+  ai-slop/hardcoded-url: "off"
+  # Server-side operational logging is intentional here; there is no logger
+  # framework in this project and warn/error already go to the same place.
+  ai-slop/console-leftover: "off"
+
+ci:
+  failBelow: 70

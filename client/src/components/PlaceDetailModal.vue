@@ -1,6 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { colorFor, formatDistance, iconFor, ridingMinutes, walkingMinutes } from "../lib/categories";
+import { fetchPlaceVideos } from "../services/api";
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -17,6 +18,71 @@ const imageIndex = ref(0);
 const hoursOpen = ref(false);
 const reviewTab = ref("pros");
 const showAllReviews = ref(false);
+
+// Videos load after the details, per place, and are kept for the session.
+const videos = ref([]);
+const videoLinks = ref([]);
+const videosLoading = ref(false);
+const videosError = ref("");
+const videosCache = new Map();
+let videosController = null;
+
+/** The town or district from the address, to steer the video search. */
+function areaFromAddress(address) {
+  const parts = String(address || "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const kecamatan = parts.find((part) => /^Kec\.|^Kecamatan/i.test(part));
+  const kabupaten = parts.find((part) => /^Kabupaten|^Kota|Surabaya|Sidoarjo/i.test(part));
+
+  return [kecamatan, kabupaten]
+    .filter(Boolean)
+    .map((part) => part.replace(/^(Kec\.|Kecamatan|Kabupaten|Kota)\s*/i, "").replace(/\s+\d{5}$/, ""))
+    .filter((part, index, list) => part && list.indexOf(part) === index)
+    .join(" ");
+}
+
+async function loadVideos(details) {
+  videosController?.abort();
+  videos.value = [];
+  videoLinks.value = [];
+  videosError.value = "";
+
+  const name = details?.name;
+
+  if (!name || details.unnamed) {
+    videosLoading.value = false;
+    return;
+  }
+
+  if (videosCache.has(details.id)) {
+    Object.assign(videos, { value: videosCache.get(details.id).videos });
+    videoLinks.value = videosCache.get(details.id).links;
+    videosLoading.value = false;
+    return;
+  }
+
+  videosController = new AbortController();
+  videosLoading.value = true;
+
+  try {
+    const payload = await fetchPlaceVideos(name, areaFromAddress(details.address), videosController.signal);
+    videosCache.set(details.id, payload);
+    videos.value = payload.videos || [];
+    videoLinks.value = payload.links || [];
+  } catch (err) {
+    if (err.name !== "AbortError") {
+      videosError.value = "Video search is unavailable right now.";
+      videoLinks.value = [];
+    }
+  } finally {
+    videosLoading.value = false;
+  }
+}
+
+watch(() => props.details, (details) => loadVideos(details));
+onBeforeUnmount(() => videosController?.abort());
 
 /** Google's day indexes: 1 = Senin … 7 = Minggu. */
 const DAY_SHORT = ["Sen", "Sel", "Rab", "Kam", "Jum", "Sab", "Min"];
@@ -417,6 +483,57 @@ const title = computed(() => {
                   <span v-else class="glance-value muted">Not enough data</span>
                 </li>
               </ul>
+            </section>
+
+            <!-- ----------------------------------------------------------- Videos -->
+            <section v-if="!details.unnamed" class="modal-section">
+              <h3>
+                Videos
+                <span class="section-note">YouTube · about this place</span>
+              </h3>
+
+              <ul v-if="videosLoading" class="video-list" aria-busy="true">
+                <li v-for="n in 3" :key="n" class="video-card skeleton">
+                  <span class="shimmer video-thumb"></span>
+                  <span class="video-body">
+                    <span class="shimmer line w85"></span>
+                    <span class="shimmer line w50"></span>
+                  </span>
+                </li>
+              </ul>
+
+              <ul v-else-if="videos.length" class="video-list">
+                <li v-for="video in videos" :key="video.id" class="video-card">
+                  <a :href="video.url" target="_blank" rel="noopener noreferrer">
+                    <span class="video-thumb">
+                      <img :src="video.thumbnail" :alt="video.title" loading="lazy" referrerpolicy="no-referrer" />
+                      <span class="video-play" aria-hidden="true">▶</span>
+                      <span v-if="video.kind === 'short'" class="video-badge">Shorts</span>
+                      <span v-else-if="video.duration" class="video-badge">{{ video.duration }}</span>
+                    </span>
+                    <span class="video-body">
+                      <strong class="video-title">{{ video.title }}</strong>
+                      <span class="video-meta">
+                        <template v-if="video.channel">{{ video.channel }}</template>
+                        <template v-if="video.views"> · {{ video.views }}</template>
+                        <template v-if="video.published"> · {{ video.published }}</template>
+                      </span>
+                    </span>
+                  </a>
+                </li>
+              </ul>
+
+              <p v-else class="muted video-empty">
+                {{ videosError || "No YouTube video names this place yet." }}
+              </p>
+
+              <div v-if="videoLinks.length" class="video-links">
+                <span class="pane-title">Search on</span>
+                <a v-for="link in videoLinks" :key="link.platform" :href="link.url" target="_blank" rel="noopener noreferrer" class="attr-chip" :class="`video-link-${link.platform}`">
+                  {{ link.label }} ↗
+                </a>
+                <span class="glance-source">Instagram and TikTok only answer signed-in browsers, so those open a search there.</span>
+              </div>
             </section>
 
             <!-- ---------------------------------------------------- Popular times -->

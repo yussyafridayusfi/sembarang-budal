@@ -29,7 +29,7 @@ export async function fetchWithTimeout(url, { timeoutMs = 8000, ...options } = {
       headers: {
         "User-Agent": USER_AGENT,
         Accept: "application/json",
-        ...(options.headers || {})
+        ...options.headers
       }
     });
   } finally {
@@ -92,7 +92,7 @@ export async function fetchJsonWithRetry(
  * without a limit turns into a wall of 429s.
  */
 export async function mapWithConcurrency(items, limit, worker) {
-  const results = new Array(items.length);
+  const results = Array.from({ length: items.length });
   let cursor = 0;
 
   async function run() {

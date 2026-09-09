@@ -7,6 +7,9 @@
 - `npm start` — Express serving `dist/` + the API on :3000
 - `npm run ingest -- --area "<city>" --radius <m>` — pre-scrape places into the DB
 - `npm run stats` — what the place database currently holds
+- `npm run slop` — aislop quality gate (AI-slop patterns, complexity, lint,
+  security); `npm run slop:fix` applies the mechanical fixes. Config in
+  `.aislop/config.yml`; `docs/` and `dist/` are built bundles and excluded.
 
 There is no test script.
 
@@ -31,6 +34,9 @@ There is no test script.
     (the `/maps/preview/place` RPC, keyed by the card's feature id): photos,
     price, review texts, attribute groups, popular times. Keyless; needs the
     landing-page cookies, warmed at startup. Cached in `geocodes` for 3 days
+  - `sources/videos.js` — up to three YouTube videos about a place, read off
+    the results page's `ytInitialData` and filtered by name relevance, plus
+    search links for TikTok and Instagram (both need a signed-in browser)
   - `mapLink.js` — resolves a pasted Google Maps / share link to coordinates,
     or to a place name when that is all the link carries
   - `addressQuery.js` — progressively coarser variants of a typed address, so a
@@ -139,6 +145,10 @@ There is no test script.
   ratings; keep `basedOn` and `reviewCount` apart in the UI.
 - **Never invent place data.** Missing ratings, photos and phone numbers are
   reported as unknown, not filled in with plausible values.
+- **A meeting-point row must sit on the map before anything is saved.** The
+  panel resolves typed rows itself and blocks the save with a per-row "not
+  found" when a row cannot be placed; the server's `failed` list is a last
+  resort, not the primary check, because it saves the rows that did resolve.
 - **The Maps listing RPC needs an aged cookie and exactly three headers.**
   `/maps/preview/place` answers an 18 KB stub (rating, no count, no reviews,
   no price) unless the request carries the cookies a `/maps` page load sets,

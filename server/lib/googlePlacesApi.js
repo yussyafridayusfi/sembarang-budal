@@ -303,12 +303,8 @@ export async function searchNearbyPlaceId(lat, lng, categoryId, { radius = 25, t
   }
 }
 
-/**
- * Resolve a photo resource name to a short-lived image URL. Used by the photo
- * proxy route so the API key never reaches the browser: the browser asks our
- * server, our server asks Google with the key, and redirects to the plain
- * googleusercontent URL Google hands back.
- */
+/** Photo resource name → short-lived googleusercontent URL, fetched with the
+ * key server-side so the key never reaches the browser. */
 export async function resolvePhotoUri(photoName, { maxWidthPx = 1000, timeoutMs = 7000 } = {}) {
   if (!API_KEY || !photoName || !/^places\/[^/]+\/photos\/[^/]+$/.test(photoName)) {
     return "";

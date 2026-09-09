@@ -80,10 +80,6 @@ let lastRequestAt = 0;
  * listings alike - so the spacing holds across both.
  */
 export function scheduleGoogleRequest(task) {
-  return schedule(task);
-}
-
-function schedule(task) {
   const run = queueTail.then(async () => {
     const wait = MIN_INTERVAL_MS - (Date.now() - lastRequestAt);
 
@@ -379,7 +375,7 @@ async function resolveCard(text, { timeoutMs = 8000, requireRelevance = true } =
     }
   }
 
-  const place = await schedule(() => fetchEmbed(trimmed, timeoutMs));
+  const place = await scheduleGoogleRequest(() => fetchEmbed(trimmed, timeoutMs));
 
   // Google answers what it thinks you meant. For text it cannot place that is
   // usually nothing, but not always - so the result still has to share an

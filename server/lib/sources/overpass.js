@@ -73,9 +73,9 @@ async function runQuery(query, deadline, maxPerMirrorMs) {
       });
 
       if (!Array.isArray(data.elements)) {
-        // A mirror answering 200 without an `elements` array is misconfigured;
-        // treating it as "zero places found" is how empty results used to be
-        // reported as success.
+        // A mirror answering 200 without an `elements` array is misconfigured,
+        // not empty: overpass.osm.ch does exactly this, and reading it as "zero
+        // places found" would record the area as covered.
         throw new HttpError(502, `${mirror} returned no elements array`);
       }
 

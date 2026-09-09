@@ -96,7 +96,7 @@ function mergePlaces(groups) {
     merged.set(place.id, {
       ...(incomingWins ? place : existing),
       address: existing.address || place.address || "",
-      tags: { ...(existing.tags || {}), ...(place.tags || {}) }
+      tags: { ...existing.tags, ...place.tags }
     });
   });
 
