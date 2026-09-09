@@ -677,6 +677,30 @@ with its resolved address. A row that cannot be placed is marked in red with
 a role="alert" notice names every such row, and nothing is saved until they are
 fixed.
 
+### Start over
+
+Everything the app remembers can be cleared from one place. **Start over** sits
+in the header, appears only when there is something to clear, and names it
+before doing anything: "This clears the current search, 6 recent centres and 2
+saved meeting-point locations. It cannot be undone." Confirming clears, in this
+order:
+
+- the current search - centre, radius back to 2 km, the default categories, the
+  keyword, the results and the cached place details;
+- the selection and the open detail sheet;
+- the six recent centres in `localStorage`;
+- the saved meeting-point route, which lives on the server, so that one is a
+  `DELETE /api/locations`. A failure there does not block the reset: the local
+  copy is gone either way and the next save overwrites the server's.
+
+Then the app is back to how it opens: Explore mode, panel open, the URL hash
+dropped, and the map flown back to the Indonesia-wide view with the ring,
+centre dot and radius handle taken off it. The two panels are remounted through
+a changing `:key`, because clearing the shared state would otherwise leave the
+search box's text and the meeting-point rows' half-typed entries behind.
+
+Escape or Cancel backs out without touching anything.
+
 ### Installable on a phone
 
 The app was already responsive (bottom sheet, 720 px breakpoint) and had a

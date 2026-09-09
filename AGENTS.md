@@ -145,6 +145,10 @@ There is no test script.
   ratings; keep `basedOn` and `reviewCount` apart in the UI.
 - **Never invent place data.** Missing ratings, photos and phone numbers are
   reported as unknown, not filled in with plausible values.
+- **The results header sticks below the brand, so its offset is measured.**
+  `.results-header`'s `top` reads `var(--brand-height)`, set from the header's
+  real height by a `ResizeObserver` in `App.vue`. It was a hand-written 108px
+  (62px on phones) and broke silently the moment the header gained a row.
 - **A meeting-point row must sit on the map before anything is saved.** The
   panel resolves typed rows itself and blocks the save with a per-row "not
   found" when a row cannot be placed; the server's `failed` list is a last
