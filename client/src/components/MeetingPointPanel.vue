@@ -5,7 +5,9 @@ import { clearSavedRoute, saveRoute, searchLocations } from "../services/api";
 const props = defineProps({
   locations: { type: Array, default: () => [] },
   center: { type: Object, default: null },
-  suggestedRadius: { type: Number, default: 2000 }
+  suggestedRadius: { type: Number, default: 2000 },
+  /** The map's view centre - the bias when no row is pinned and no midpoint exists. */
+  mapCenter: { type: Object, default: null }
 });
 
 const emit = defineEmits(["saved", "use-center"]);
@@ -45,7 +47,7 @@ function createRow(name = "") {
  */
 async function resolveRow(row) {
   const query = row.name.trim();
-  const anchor = rows.value.find((other) => other !== row && other.lat !== null) || props.center;
+  const anchor = rows.value.find((other) => other !== row && other.lat !== null) || props.center || props.mapCenter;
   const response = await searchLocations(query, undefined, anchor);
   const best = (response.suggestions || [])[0];
 
@@ -141,7 +143,8 @@ function scheduleSuggest(index, value) {
         // other end of the same trip is the best hint we have about which one.
         const anchor =
           rows.value.find((other, otherIndex) => otherIndex !== index && other.lat !== null) ||
-          props.center;
+          props.center ||
+          props.mapCenter;
 
         const response = await searchLocations(query, controller.signal, anchor);
         suggestionsByRow.value = { ...suggestionsByRow.value, [index]: response.suggestions || [] };
@@ -178,6 +181,30 @@ function pickSuggestion(index, suggestion) {
   linkByRow.value = { ...linkByRow.value, [index]: null };
   areaByRow.value = { ...areaByRow.value, [index]: "" };
   openRow.value = -1;
+}
+
+/** "Royal Plaza, Jl. Ahmad Yani…" → "Jl. Ahmad Yani…": the name is already the heading. */
+function secondaryLine(suggestion) {
+  const name = String(suggestion.name || "").trim();
+  const display = String(suggestion.displayName || "").trim();
+
+  if (name && display.toLowerCase().startsWith(name.toLowerCase())) {
+    return display.slice(name.length).replace(/^[s,–—-]+/, "");
+  }
+
+  return display;
+}
+
+function formatDistance(metres) {
+  if (!Number.isFinite(metres)) {
+    return "";
+  }
+
+  if (metres >= 100000) {
+    return `${Math.round(metres / 1000)} km`;
+  }
+
+  return metres >= 1000 ? `${(metres / 1000).toFixed(1)} km` : `${Math.round(metres)} m`;
 }
 
 function addRow() {
@@ -348,8 +375,12 @@ function formatRadius(metres) {
             </li>
             <li v-for="suggestion in suggestionsByRow[index] || []" :key="`${suggestion.osmType}${suggestion.osmId}${suggestion.lat}`">
               <button type="button" @mousedown.prevent="pickSuggestion(index, suggestion)">
-                <strong>{{ suggestion.name }}</strong>
-                <span>{{ suggestion.displayName }}</span>
+                <span class="suggest-glyph" aria-hidden="true">📍</span>
+                <strong>
+                  {{ suggestion.name || suggestion.displayName }}
+                  <em v-if="formatDistance(suggestion.distance)" class="suggest-distance">{{ formatDistance(suggestion.distance) }}</em>
+                </strong>
+                <span v-if="secondaryLine(suggestion)">{{ secondaryLine(suggestion) }}</span>
               </button>
             </li>
           </ul>

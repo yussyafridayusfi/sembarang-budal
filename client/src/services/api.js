@@ -61,15 +61,22 @@ export function fetchCategories() {
 }
 
 /**
- * `near` biases the lookup towards a point. It matters most for a pasted Google
- * share link: those often carry only a bare name ("Royal Plaza"), which has
- * matches on several continents.
+ * `near` biases the lookup towards a point, and its optional `bounds` (the
+ * map's viewport) towards an area. A bare name ("Royal Plaza") has matches on
+ * several continents; a point far from all of them, such as the centre of
+ * Indonesia, biases weakly - the viewport is what puts Surabaya first.
  */
 export function searchLocations(query, signal, near = null) {
   const params = new URLSearchParams({ query });
 
   if (near && Number.isFinite(near.lat) && Number.isFinite(near.lng)) {
     params.set("near", `${near.lat},${near.lng}`);
+  }
+
+  const b = near?.bounds;
+
+  if (b && [b.minLat, b.minLng, b.maxLat, b.maxLng].every(Number.isFinite)) {
+    params.set("view", `${b.minLat},${b.minLng},${b.maxLat},${b.maxLng}`);
   }
 
   return requestJson(`${API_BASE}/search?${params.toString()}`, { signal });

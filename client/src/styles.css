@@ -2821,3 +2821,25 @@ ul.notice.warn {
     }
   }
 }
+
+/* Distance from the search bias, on a suggestion row. */
+.suggest-distance {
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 0.66rem;
+  font-style: normal;
+  font-weight: 500;
+  color: var(--text-soft);
+  background: var(--panel-soft);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  vertical-align: 1px;
+}
+
+/* Long addresses stay on two lines at most. */
+.combo-list button span:not(.suggest-glyph):not(.recent-glyph) {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}

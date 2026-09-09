@@ -22,6 +22,16 @@ const mode = ref("explore");
 const categories = ref([]);
 const selectedCategories = ref([...DEFAULT_CATEGORIES]);
 const center = ref(null);
+/** The map's current view centre: what a text search is biased towards when
+ * no search centre has been chosen yet (Indonesia at first, then wherever the
+ * person has panned). */
+const viewCenter = ref({
+  lat: -2.5,
+  lng: 118,
+  zoom: 5,
+  bounds: { minLat: -11, minLng: 95, maxLat: 6, maxLng: 141 }
+});
+const searchBias = computed(() => center.value || viewCenter.value);
 const centerLabel = ref("");
 const radius = ref(2000);
 const keyword = ref("");
@@ -446,6 +456,7 @@ if (launchParams.toString()) {
       @hover-place="hoveredPlaceId = $event"
       @pick-center="(point) => setCenter(point)"
       @area-changed="(point) => setCenter(point)"
+      @view-changed="viewCenter = $event"
       @update:radius="radius = $event"
       @use-my-location="useMyLocation"
     />
@@ -528,6 +539,7 @@ if (launchParams.toString()) {
           :locating="locating"
           :has-results="hasResults"
           :recent="recent"
+          :map-center="searchBias"
           @update:radius="radius = $event"
           @update:selected-categories="selectedCategories = $event"
           @update:keyword="keyword = $event"
@@ -565,6 +577,7 @@ if (launchParams.toString()) {
         v-else
         :locations="routeLocations"
         :center="routeCenter"
+        :map-center="searchBias"
         :suggested-radius="routeSuggestedRadius"
         @saved="handleRouteSaved"
         @use-center="useRouteCenter"

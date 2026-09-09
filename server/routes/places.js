@@ -62,12 +62,12 @@ function biasBox(near) {
 }
 
 /** Nominatim's own results, used as the autocomplete fallback. */
-async function nominatimSuggestions(query, near = null) {
+async function nominatimSuggestions(query, near = null, view = null) {
   const results = await searchPlaces(query, {
     limit: 20,
     countryCodes: COUNTRY_CODES,
     timeoutMs: 8000,
-    viewbox: biasBox(near),
+    viewbox: view || biasBox(near),
     // Bias, never restrict: a place just outside the box should still be found.
     bounded: false
   });
@@ -151,6 +151,28 @@ async function googlePlaceSuggestions(name, near) {
 }
 
 /** `near=lat,lng` - an optional point to bias results towards. */
+/**
+ * `view=minLat,minLng,maxLat,maxLng` - the map viewport the person is looking
+ * at. A point bias alone is weak from far away: biased towards the centre of
+ * Indonesia, Photon still put Manila's Royal Plaza above Surabaya's. Results
+ * inside the viewport are asked for first, then topped up from the whole world.
+ */
+function parseView(raw) {
+  const parts = String(raw || "").split(",").map(toNumber);
+
+  if (parts.length !== 4 || parts.some((value) => value === null)) {
+    return null;
+  }
+
+  const [minLat, minLng, maxLat, maxLng] = parts;
+
+  if (minLat >= maxLat || minLng >= maxLng || Math.abs(minLat) > 90 || Math.abs(maxLat) > 90) {
+    return null;
+  }
+
+  return { minLat, minLng, maxLat, maxLng };
+}
+
 function parseNear(raw) {
   const parts = String(raw || "").split(",");
 
@@ -232,6 +254,7 @@ router.get("/search", async (req, res) => {
   }
 
   const near = parseNear(req.query.near);
+  const view = parseView(req.query.view);
 
   // A pasted coordinate pair is already the answer. This is the exact, free way
   // to pin a place no geocoder holds: right-click it in Google Maps and the
@@ -389,15 +412,39 @@ router.get("/search", async (req, res) => {
     return nominatimSuggestions(text, bias);
   }
 
-  let result = await firstMatch((variant) =>
-    searchPhoton(variant, { limit: 15, countryCodes: COUNTRY_CODES, timeoutMs: 6000, near })
-  );
+  /** Photon: what is inside the viewport first, topped up from everywhere. */
+  async function photonSuggestions(variant) {
+    const options = { limit: 15, countryCodes: COUNTRY_CODES, timeoutMs: 6000, near };
+
+    if (!view) {
+      return searchPhoton(variant, options);
+    }
+
+    const inView = await searchPhoton(variant, { ...options, viewbox: view });
+
+    if (inView.length >= 5) {
+      return inView;
+    }
+
+    let wider = [];
+
+    try {
+      wider = await searchPhoton(variant, options);
+    } catch {
+      // The in-view answer stands on its own.
+    }
+
+    const seen = new Set(inView.map((item) => `${item.lat.toFixed(4)},${item.lng.toFixed(4)}`));
+    return inView.concat(wider.filter((item) => !seen.has(`${item.lat.toFixed(4)},${item.lng.toFixed(4)}`)));
+  }
+
+  let result = await firstMatch(photonSuggestions);
 
   // Fall back rather than fail: Photon may be unreachable, and it indexes fewer
   // administrative boundaries than Nominatim, so an empty answer from it is not
   // evidence that the place does not exist.
   if (!result.suggestions.length) {
-    const viaNominatim = await firstMatch((variant) => nominatimSuggestions(variant, near));
+    const viaNominatim = await firstMatch((variant) => nominatimSuggestions(variant, near, view));
 
     // Prefer Nominatim's answer whenever it managed to give one - an empty
     // answer from a source that worked beats an error from one that did not.
@@ -489,14 +536,20 @@ router.get("/search", async (req, res) => {
     ? [result.suggestions.slice(0, 1), result.suggestions.slice(1)]
     : [[], result.suggestions];
 
+  // A row whose name is exactly what was typed counts as half as far: the mall
+  // "Royal Plaza" belongs above the "Ace Hardware Royal Plaza" inside it, which
+  // plain distance put first by a hundred metres.
+  const typed = normalizeAddressQuery(query).toLowerCase() || query.toLowerCase();
+  const rankDistance = (item) =>
+    haversineDistanceMeters(near.lat, near.lng, item.lat, item.lng) *
+    (String(item.name || "").trim().toLowerCase() === typed ? 0.5 : 1);
+
   const ordered = exact.concat(
-    near
-      ? [...others].sort(
-          (a, b) =>
-            haversineDistanceMeters(near.lat, near.lng, a.lat, a.lng) -
-            haversineDistanceMeters(near.lat, near.lng, b.lat, b.lng)
-        )
-      : others
+    near ? [...others].sort((a, b) => rankDistance(a) - rankDistance(b)) : others
+  ).map((item) =>
+    // The distance is shown on the row, so "Royal Plaza · 1.2 km" and
+    // "Royal Plaza · 15,000 km" are told apart at a glance.
+    near ? { ...item, distance: Math.round(haversineDistanceMeters(near.lat, near.lng, item.lat, item.lng)) } : item
   );
 
   // Set only when the query was genuinely relaxed, so the UI can say so rather

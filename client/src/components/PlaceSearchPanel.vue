@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref, watch } from "vue";
 import { searchLocations } from "../services/api";
-import { formatRadius, iconFor } from "../lib/categories";
+import { formatRadius, iconFor, formatDistance } from "../lib/categories";
 
 const props = defineProps({
   center: { type: Object, default: null },
@@ -15,8 +15,22 @@ const props = defineProps({
   /** Once results exist the controls fold into a summary bar; the chip strip
    * stays out because changing category is the most common next action. */
   hasResults: { type: Boolean, default: false },
-  recent: { type: Array, default: () => [] }
+  recent: { type: Array, default: () => [] },
+  /** The map's view centre, the search bias before a centre is chosen. */
+  mapCenter: { type: Object, default: null }
 });
+
+/** "Royal Plaza, Jl. Ahmad Yani…" → "Jl. Ahmad Yani…": the name is already the heading. */
+function secondaryLine(suggestion) {
+  const name = String(suggestion.name || "").trim();
+  const display = String(suggestion.displayName || "").trim();
+
+  if (name && display.toLowerCase().startsWith(name.toLowerCase())) {
+    return display.slice(name.length).replace(/^[s,–—-]+/, "");
+  }
+
+  return display === name ? "" : display;
+}
 
 const emit = defineEmits([
   "update:radius",
@@ -140,7 +154,7 @@ function scheduleSuggest(value) {
     controller = request;
 
     try {
-      const response = await searchLocations(query, request.signal, props.center);
+      const response = await searchLocations(query, request.signal, props.center || props.mapCenter);
       suggestions.value = response.suggestions || [];
       matchedQuery.value = response.matchedQuery || "";
       linkInfo.value = response.link || null;
@@ -314,8 +328,11 @@ const listOpen = computed(
                 @mousemove="activeIndex = index"
               >
                 <span class="suggest-glyph" aria-hidden="true">📍</span>
-                <strong>{{ suggestion.name }}</strong>
-                <span>{{ suggestion.displayName }}</span>
+                <strong>
+                  {{ suggestion.name || suggestion.displayName }}
+                  <em v-if="suggestion.distance" class="suggest-distance">{{ formatDistance(suggestion.distance) }}</em>
+                </strong>
+                <span v-if="secondaryLine(suggestion)">{{ secondaryLine(suggestion) }}</span>
               </button>
             </li>
           </template>
