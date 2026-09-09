@@ -27,6 +27,10 @@ There is no test script.
   - `categories.js` — the category taxonomy, and the OSM tags each maps to
   - `sources/googleMaps.js` — resolves text OSM cannot place through Google
     Maps' embed endpoint; one request per distinct text, cached in `geocodes`
+  - `sources/googleMapsPlace.js` — reads a place's public Google Maps listing
+    (the `/maps/preview/place` RPC, keyed by the card's feature id): photos,
+    price, review texts, attribute groups, popular times. Keyless; needs the
+    landing-page cookies, warmed at startup. Cached in `geocodes` for 3 days
   - `mapLink.js` — resolves a pasted Google Maps / share link to coordinates,
     or to a place name when that is all the link carries
   - `addressQuery.js` — progressively coarser variants of a typed address, so a
@@ -135,3 +139,14 @@ There is no test script.
   ratings; keep `basedOn` and `reviewCount` apart in the UI.
 - **Never invent place data.** Missing ratings, photos and phone numbers are
   reported as unknown, not filled in with plausible values.
+- **The Maps listing RPC needs an aged cookie and exactly three headers.**
+  `/maps/preview/place` answers an 18 KB stub (rating, no count, no reviews,
+  no price) unless the request carries the cookies a `/maps` page load sets,
+  and a cookie younger than ~3 s still gets the stub (1.5 s gets count and
+  reviews but no price or attributes). Send only `User-Agent`,
+  `Accept-Language` and `Cookie`: an explicit `Accept`, a `Referer` or the
+  Sec-Fetch-* set trims the payload again. Warm the jar at startup, never
+  cache a stub for days, and read the place at `[6]` by fixed index - name
+  `[11]`, rating `[4][7]`, count `[4][8]`, price `[4][2]`, photos `[72]`/`[51]`,
+  attributes `[100]`, popular times `[84]`, reviews `[175][9][0][0]`, hours
+  `[203]`, phone `[178]`, Place ID `[78]`.

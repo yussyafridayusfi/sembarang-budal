@@ -536,16 +536,48 @@ value names its source, and anything we do not know says so.
 
 | section | source | needs a key? |
 | --- | --- | --- |
-| Rating, review count | the place's Google Maps card (`sources/googleMaps.js`) | no |
-| Open now / weekly hours | Maps card → Places API → OSM `opening_hours` | no |
-| Phone, website | Places API → Maps card → OSM tags | no |
-| Photos (gallery with prev/next) | Places API via `/api/place/photo` → OSM `image` / Wikimedia | photos: yes |
-| Price range | Places API `priceRange` / `priceLevel` | yes |
+| Rating, review count, 1–5★ histogram | the place's public Google Maps listing (`sources/googleMapsPlace.js`), else its Maps card | no |
+| Open now / weekly hours | Places API → Maps listing/card → OSM `opening_hours` | no |
+| Phone, website | Places API → Maps listing/card → OSM tags | no |
+| Photos (gallery with prev/next) | Places API via `/api/place/photo` → Maps listing (direct `lh3` URLs) → OSM `image` / Wikimedia | no |
+| Price range + how many people reported each band | Places API → Maps listing | no |
 | Review summary | Places API `reviewSummary` (Google's own, drawn from all reviews) | yes |
-| Pros / Cons / Common complaints / Best menu | counted from Places API review texts (`reviewInsights.js`) | yes |
-| 🎭 Atmosphere, 🚗 Parking, 💳 Payment | Places API structured attributes → OSM tags → review mentions | partly |
-| ⏱️ Waiting time, 👥 Crowd, 📍 Location | review mentions only | yes |
+| Google's pull-quotes, "reviewers mention" topics | Maps listing | no |
+| Reviews (text, stars, photos, owner reply) | Places API (5) → Maps listing (8) | no |
+| Pros / Cons / Common complaints / Best menu | counted from those review texts (`reviewInsights.js`) | no |
+| 🎭 Atmosphere, 🚗 Parking, 💳 Payment, 👥 Crowd | Places API → Maps listing attribute groups → OSM tags → review mentions | no |
+| ⏱️ Waiting time | Maps listing popular-times sentence → review mentions | no |
+| 📍 Location | review mentions only | no |
 | 🔥 Popularity | Google review count, bucketed | no |
+| Popular times (per day, per hour, live "not too busy") | Maps listing | no |
+| Facilities & options (every attribute group, incl. explicit "no"s) | Maps listing | no |
+| "Inside Royal Plaza", order-online link, about text | Maps listing | no |
+
+**The Maps listing, and how it is read for free.** The detail panel used to
+stop at the embed card and say that photos, price and reviews needed
+`GOOGLE_PLACES_API_KEY`. They do not. The Maps web client renders a place panel
+from one RPC, `/maps/preview/place`, keyed by the same `0x…:0x…` feature id the
+embed card gives us, and that RPC answers a plain client - with three
+conditions, all measured on Kopi Kenangan Royal Plaza, Royal Plaza and Mie
+Gacoan Puri Surya Jaya:
+
+- it must carry the cookies a plain `/maps` page load sets; without them the
+  same URL returns an 18 KB stub with a rating and nothing else;
+- the cookie must be at least ~3 s old - at 0 s the stub, at 1.5 s count and
+  reviews but no price or attributes, at 3 s the full 180–300 KB payload - so
+  the jar is warmed at server start and a request waits for its cookie to age;
+- only `User-Agent`, `Accept-Language` and `Cookie` may be sent; adding an
+  `Accept`, a `Referer` or Sec-Fetch-* headers trims the payload again.
+
+The payload is a positional array (`[6][11]` name, `[6][4][7]` rating,
+`[6][4][8]` count, `[6][4][2]` price, `[6][175][9]` reviews, `[6][100]`
+attribute groups, `[6][84]` popular times with a per-day "Waktu tunggu maksimal
+hingga 1 jam dari 19.00–21.00" sentence …); anything off-shape reads as
+unknown. One request per place a person opens, cached for three days, spaced
+on the same queue as the embed requests, and switched off by
+`GOOGLE_MAPS_RESOLVER=0`. It is automated access to Google Maps content, which
+Google's terms restrict, and can stop working without notice; the Places API
+path stays as the supported alternative and wins where both have a value.
 
 **The Maps card, and why it is trusted.** The public embed payload turned out
 to carry the whole place card, not just coordinates: for Mie Gacoan Puri Surya
@@ -558,7 +590,8 @@ card is attached to an OSM place only when it lands within 300 m *and* shares
 the name's identifying tokens; otherwise the panel gets nothing from it and
 says why. The wrong card with a real source label would be fabricated data.
 
-**Why the review findings say "2 of 5".** The Places API returns at most five
+**Why the review findings say "2 of 8".** The Maps listing carries eight review
+texts and the Places API at most five
 review texts. Pros, cons, complaints, best menu, waiting time, crowd, parking,
 payment and findability are *counted* from those texts against a short
 bilingual lexicon - "parkir susah", "antri 20 menit", "wajib coba mie

@@ -45,8 +45,9 @@ const ENABLED = process.env.GOOGLE_MAPS_RESOLVER !== "0";
 const EMBED_URL = "https://www.google.com/maps/embed";
 
 /** Google serves the bot-check to anything that does not look like a browser. */
-const USER_AGENT =
+export const GOOGLE_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+const USER_AGENT = GOOGLE_USER_AGENT;
 
 /** Spacing between live requests. Cache hits do not wait. */
 const MIN_INTERVAL_MS = Number(process.env.GOOGLE_MAPS_MIN_INTERVAL_MS || 800);
@@ -73,6 +74,14 @@ const PLUS_CODE = "[23456789CFGHJMPQRVWX]{4,8}\\+[23456789CFGHJMPQRVWX]{2,3}";
 
 let queueTail = Promise.resolve();
 let lastRequestAt = 0;
+
+/**
+ * One queue for every live Google Maps request - embed cards and place
+ * listings alike - so the spacing holds across both.
+ */
+export function scheduleGoogleRequest(task) {
+  return schedule(task);
+}
 
 function schedule(task) {
   const run = queueTail.then(async () => {
