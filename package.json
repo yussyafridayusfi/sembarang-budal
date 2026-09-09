@@ -28,5 +28,8 @@
     "concurrently": "^9.1.2",
     "nodemon": "^3.1.10",
     "vite": "^5.4.19"
+  },
+  "engines": {
+    "node": "22.x"
   }
 }
