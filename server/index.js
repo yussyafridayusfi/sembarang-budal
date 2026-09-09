@@ -55,13 +55,15 @@ app.use((error, req, res, next) => {
   return res.status(500).json({ error: "Unexpected server error." });
 });
 
-if (process.env.VERCEL !== "1") {
-  // The Maps listing RPC only answers in full to a cookie a few seconds old;
-  // fetch it now so the first place a person opens does not pay that wait.
-  if (googleMapsResolverEnabled()) {
-    warmGoogleMapsCookies();
-  }
+// The Maps listing RPC only answers in full to a cookie a few seconds old;
+// fetch it as soon as the module loads - on a serverless cold start as much
+// as on a local server - so the first place a person opens does not pay
+// that wait on top of its own requests.
+if (googleMapsResolverEnabled()) {
+  warmGoogleMapsCookies();
+}
 
+if (process.env.VERCEL !== "1") {
   app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
