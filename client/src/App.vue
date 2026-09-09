@@ -33,6 +33,34 @@ const error = ref("");
 
 const routeLocations = ref([]);
 const routeCenter = ref(null);
+
+/* ---------------------------------------------------------- install (PWA) */
+
+/** The deferred `beforeinstallprompt` event, while the browser offers install. */
+const installPrompt = ref(null);
+const installed = ref(window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true);
+
+function onBeforeInstallPrompt(event) {
+  event.preventDefault();
+  installPrompt.value = event;
+}
+
+function onAppInstalled() {
+  installPrompt.value = null;
+  installed.value = true;
+}
+
+async function installApp() {
+  const prompt = installPrompt.value;
+
+  if (!prompt) {
+    return;
+  }
+
+  prompt.prompt();
+  await prompt.userChoice.catch(() => null);
+  installPrompt.value = null;
+}
 const routeSuggestedRadius = ref(2000);
 
 const selectedPlace = ref(null);
@@ -378,7 +406,28 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.removeEventListener("resize", onResize);
   document.removeEventListener("keydown", onGlobalKeydown);
+  window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+  window.removeEventListener("appinstalled", onAppInstalled);
 });
+
+window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+window.addEventListener("appinstalled", onAppInstalled);
+
+// Manifest shortcuts land here with a query string; honour it once, then
+// let the hash carry the state as usual.
+const launchParams = new URLSearchParams(window.location.search);
+
+if (launchParams.get("mode") === "meeting") {
+  mode.value = "meeting";
+}
+
+if (launchParams.get("near") === "me" && !window.location.hash) {
+  useMyLocation();
+}
+
+if (launchParams.toString()) {
+  window.history.replaceState(null, "", window.location.pathname + window.location.hash);
+}
 </script>
 
 <template>
@@ -428,6 +477,16 @@ onBeforeUnmount(() => {
           <h1>Sembarang Budal</h1>
           <p>Somewhere to go, anywhere inside a radius you choose.</p>
         </div>
+        <button
+          v-if="installPrompt && !installed"
+          type="button"
+          class="install-btn"
+          title="Install as an app on this device"
+          @click="installApp"
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M5 20h14v-2H5zm7-18-5.5 5.5 1.41 1.41L11 5.83V16h2V5.83l3.09 3.08 1.41-1.41z" transform="rotate(180 12 12)"/></svg>
+          Install
+        </button>
         <nav class="mode-tabs" role="tablist" aria-label="Mode">
           <button
             type="button"

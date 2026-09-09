@@ -21,6 +21,7 @@ import {
 } from "../lib/sources/googleMaps.js";
 import { fetchJson } from "../lib/http.js";
 import { resolvePhotoUri } from "../lib/googlePlacesApi.js";
+import { fetchPlaceVideos } from "../lib/sources/videos.js";
 
 const router = express.Router();
 
@@ -632,6 +633,28 @@ router.get("/place/details", async (req, res) => {
     return res.json(detail);
   } catch (error) {
     return res.status(502).json({ error: error.message || "Failed to load place details." });
+  }
+});
+
+/**
+ * Up to three videos about a place (YouTube, filtered by name relevance) and
+ * search links for TikTok, Instagram and YouTube. Separate from the details
+ * call so a slow YouTube never delays the sheet itself.
+ */
+router.get("/place/videos", async (req, res) => {
+  const name = String(req.query.name || "").trim();
+  const area = String(req.query.area || "").trim();
+
+  if (name.length < 3) {
+    return res.status(400).json({ error: "name is required." });
+  }
+
+  try {
+    const payload = await fetchPlaceVideos({ name, area });
+    res.set("Cache-Control", "public, max-age=3600");
+    return res.json(payload);
+  } catch (error) {
+    return res.status(502).json({ error: error.message || "Video search failed." });
   }
 });
 

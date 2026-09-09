@@ -29,7 +29,7 @@ async function requestJson(url, options = {}) {
       ...options,
       headers: {
         "X-Route-Id": getRouteId(),
-        ...(options.headers || {})
+        ...options.headers
       }
     });
   } catch (error) {
@@ -122,6 +122,11 @@ export function fetchPlaceDetails(place, signal) {
   if (place.address || place.displayName) params.set("address", String(place.address || place.displayName));
 
   return requestJson(`${API_BASE}/place/details?${params.toString()}`, { signal });
+}
+
+export function fetchPlaceVideos(name, area, signal) {
+  const params = new URLSearchParams({ name: String(name || ""), area: String(area || "") });
+  return requestJson(`${API_BASE}/place/videos?${params.toString()}`, { signal });
 }
 
 export function fetchSavedRoute() {

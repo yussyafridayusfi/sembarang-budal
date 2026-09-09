@@ -8,12 +8,20 @@
  * under /assets/ are safe to serve cache-first, because their names change
  * whenever their contents do.
  */
-const VERSION = "v3";
+const VERSION = "v4";
 const SHELL_CACHE = `sembarang-budal-shell-${VERSION}`;
 const ASSET_CACHE = `sembarang-budal-assets-${VERSION}`;
 const CURRENT_CACHES = [SHELL_CACHE, ASSET_CACHE];
 
-const SHELL_URLS = ["/", "/manifest.json", "/icon-192.svg", "/icon-512.svg"];
+const SHELL_URLS = [
+  "/",
+  "/manifest.json",
+  "/icon-192.png",
+  "/icon-512.png",
+  "/icon-maskable-512.png",
+  "/apple-touch-icon.png",
+  "/icon-512.svg"
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(

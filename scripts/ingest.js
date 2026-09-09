@@ -235,6 +235,7 @@ async function main() {
 
   const stats = store.stats();
   log("");
+  log(`Fetched   : +${overpassTotal} overpass, +${nominatimTotal} nominatim`);
   log(`Stored    : ${stats.places} places total (+${stats.places - before} new)`);
   log(`Backend   : ${stats.backend} at ${stats.location}`);
   log(`By category:`);

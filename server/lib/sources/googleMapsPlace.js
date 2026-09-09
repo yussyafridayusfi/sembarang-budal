@@ -105,11 +105,8 @@ async function getWarmCookies({ force = false } = {}) {
   return jar.header;
 }
 
-/**
- * Fetch the cookies ahead of the first place a person opens, so that opening
- * it does not also pay the warm-up wait. Safe to call at server start; a
- * failure only means the first listing request fetches them itself.
- */
+/** Fetch the cookies at server start so the first opened place does not pay
+ * the warm-up wait. A failure here only means that request fetches them. */
 export function warmGoogleMapsCookies() {
   return getCookieJar().then(
     () => true,

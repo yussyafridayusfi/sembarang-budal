@@ -11,7 +11,9 @@
     "preview": "vite preview --config vite.config.js",
     "start": "node server/index.js",
     "ingest": "node scripts/ingest.js",
-    "stats": "node -e \"import('./server/lib/db.js').then(m=>console.log(JSON.stringify(m.getStore().stats(),null,2)))\""
+    "stats": "node -e \"import('./server/lib/db.js').then(m=>console.log(JSON.stringify(m.getStore().stats(),null,2)))\"",
+    "slop": "aislop scan",
+    "slop:fix": "aislop fix"
   },
   "dependencies": {
     "dotenv": "^17.4.2",
@@ -22,6 +24,7 @@
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.2.1",
+    "aislop": "^0.16.1",
     "concurrently": "^9.1.2",
     "nodemon": "^3.1.10",
     "vite": "^5.4.19"

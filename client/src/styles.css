@@ -2642,3 +2642,182 @@ ul.notice.warn {
     grid-template-columns: 1fr;
   }
 }
+
+/* Meeting point rows: the resolved address, or why a row blocks the save. */
+.row-address {
+  margin: 4px 0 0 2px;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: var(--text-soft);
+}
+
+.row-address-error {
+  color: var(--danger);
+}
+
+.row-unresolved input {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px rgba(201, 42, 42, 0.12);
+}
+
+/* Videos about the place */
+.video-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.video-card a {
+  display: grid;
+  grid-template-columns: 128px 1fr;
+  gap: 10px;
+  align-items: center;
+  padding: 6px;
+  color: inherit;
+  text-decoration: none;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  transition: background 0.15s, box-shadow 0.15s;
+}
+
+.video-card a:hover {
+  background: var(--panel-softer);
+  box-shadow: var(--shadow-sm);
+}
+
+.video-card.skeleton {
+  display: grid;
+  grid-template-columns: 128px 1fr;
+  gap: 10px;
+  align-items: center;
+  padding: 6px;
+}
+
+.video-thumb {
+  position: relative;
+  display: block;
+  width: 128px;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+
+.video-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.video-play {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 1.1rem;
+  color: #fff;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+}
+
+.video-badge {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  padding: 1px 5px;
+  font-size: 0.64rem;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.75);
+  border-radius: 4px;
+}
+
+.video-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.video-title {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 0.84rem;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.video-meta,
+.video-empty {
+  font-size: 0.74rem;
+  color: var(--text-soft);
+}
+
+.video-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.video-links .pane-title {
+  margin: 0;
+}
+
+.video-links .attr-chip {
+  color: var(--text);
+  background: var(--panel-soft);
+  border-color: var(--border);
+  text-decoration: none;
+}
+
+.video-links .glance-source {
+  flex-basis: 100%;
+}
+
+@media (max-width: 720px) {
+  .video-card a,
+  .video-card.skeleton {
+    grid-template-columns: 112px 1fr;
+  }
+
+  .video-thumb {
+    width: 112px;
+  }
+}
+
+/* Install as an app (shown only while the browser offers it). */
+.install-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  align-self: start;
+  padding: 5px 10px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid transparent;
+  border-radius: 999px;
+}
+
+.install-btn:hover {
+  border-color: var(--accent);
+}
+
+/* Phones with a home indicator: keep the sheet and map controls above it. */
+@supports (padding: env(safe-area-inset-bottom)) {
+  @media (max-width: 720px) {
+    .sidebar {
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+
+    .modal {
+      padding-bottom: calc(12px + env(safe-area-inset-bottom));
+    }
+  }
+}

@@ -19,6 +19,8 @@ const rows = ref([createRow(), createRow()]);
 const saving = ref(false);
 const error = ref("");
 const failed = ref([]);
+/** Row keys whose text could not be placed on the map at save time. */
+const unresolved = ref(new Set());
 
 const suggestionsByRow = ref({});
 /** Per row: how a pasted Google link was read, and whether it found anything. */
@@ -33,6 +35,46 @@ const controllers = new Map();
 
 function createRow(name = "") {
   return { key: `row-${Math.random().toString(36).slice(2, 9)}`, name, lat: null, lng: null, displayName: "" };
+}
+
+/**
+ * Place a typed row that was never picked from the list. The first suggestion
+ * is accepted only when it shares the typed name's identifying tokens - the
+ * server relaxes addresses, so "Jl. Nowhere 99" can come back as the whole
+ * village, and a pin there is worse than an honest "not found".
+ */
+async function resolveRow(row) {
+  const query = row.name.trim();
+  const anchor = rows.value.find((other) => other !== row && other.lat !== null) || props.center;
+  const response = await searchLocations(query, undefined, anchor);
+  const best = (response.suggestions || [])[0];
+
+  if (!best || typeof best.lat !== "number" || typeof best.lng !== "number") {
+    return null;
+  }
+
+  const isCoordinates = /^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/.test(query);
+
+  if (isCoordinates || /^https?:\/\//i.test(query)) {
+    return best;
+  }
+
+  // Same rule as the server's relevance filter: one or two identifying tokens
+  // must all appear, three or more need a majority. "Surabaya" alone must not
+  // turn "Royal Plaza Surabaya" into the first school in Surabaya.
+  const wanted = query
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((token) => token.length >= 3);
+  const haystack = `${best.name || ""} ${best.displayName || ""}`.toLowerCase();
+  const matched = wanted.filter((token) => haystack.includes(token)).length;
+  const needed = wanted.length <= 2 ? wanted.length : Math.floor(wanted.length / 2) + 1;
+
+  if (wanted.length && matched < needed) {
+    return null;
+  }
+
+  return best;
 }
 
 // Reflect an already-saved route back into the editable rows on first load.
@@ -64,9 +106,17 @@ function scheduleSuggest(index, value) {
 
   const query = value.trim();
 
-  // Typing invalidates a previously picked coordinate.
+  // Typing invalidates a previously picked coordinate, and clears an earlier
+  // "not found" mark so the row can be tried again.
   row.lat = null;
   row.lng = null;
+  row.displayName = "";
+
+  if (unresolved.value.has(row.key)) {
+    const next = new Set(unresolved.value);
+    next.delete(row.key);
+    unresolved.value = next;
+  }
 
   if (query.length < 2) {
     suggestionsByRow.value = { ...suggestionsByRow.value, [index]: [] };
@@ -149,6 +199,43 @@ async function save() {
   error.value = "";
   failed.value = [];
 
+  // Every location must sit on the map before anything is saved. A row typed
+  // but never picked is looked up now; one that cannot be placed blocks the
+  // save and is pointed out, rather than being dropped silently server-side.
+  const filled = rows.value.filter((row) => row.name.trim());
+  const missing = new Set();
+
+  for (const row of filled) {
+    if (row.lat !== null) {
+      continue;
+    }
+
+    try {
+      const match = await resolveRow(row);
+
+      if (match) {
+        row.lat = match.lat;
+        row.lng = match.lng;
+        row.displayName = match.displayName || "";
+      } else {
+        missing.add(row.key);
+      }
+    } catch {
+      missing.add(row.key);
+    }
+  }
+
+  unresolved.value = missing;
+
+  if (missing.size) {
+    const names = filled.filter((row) => missing.has(row.key)).map((row) => `“${row.name.trim()}”`);
+    error.value =
+      (names.length === 1 ? `${names[0]} was not found on the map.` : `${names.join(", ")} were not found on the map.`) +
+      " Pick a suggestion from the list, paste a Google Maps link, or type the coordinates as lat,lng. Nothing was saved.";
+    saving.value = false;
+    return;
+  }
+
   try {
     const payload = await saveRoute(
       rows.value
@@ -162,6 +249,11 @@ async function save() {
     );
 
     failed.value = payload.failed || [];
+
+    if (failed.value.length) {
+      error.value = "Some locations could not be placed and were left out. Fix them and save again.";
+    }
+
     emit("saved", payload);
   } catch (err) {
     error.value = err.message;
@@ -197,7 +289,7 @@ function formatRadius(metres) {
     </header>
 
     <div class="rows">
-      <div v-for="(row, index) in rows" :key="row.key" class="row">
+      <div v-for="(row, index) in rows" :key="row.key" class="row" :class="{ 'row-unresolved': unresolved.has(row.key) }">
         <span class="row-index">{{ index + 1 }}</span>
 
         <div class="combo">
@@ -206,12 +298,17 @@ function formatRadius(metres) {
             :placeholder="`Location ${index + 1} — name, address, Maps link, or lat,lng`"
             autocomplete="off"
             :value="row.name"
+            :aria-invalid="unresolved.has(row.key)"
             @input="onInput(index, $event)"
             @focus="openRow = index"
             @blur="openRow = -1"
           />
 
           <span v-if="row.lat !== null" class="row-pinned" title="Coordinates locked from your pick">pinned</span>
+          <p v-if="row.lat !== null && row.displayName" class="row-address">{{ row.displayName }}</p>
+          <p v-else-if="unresolved.has(row.key)" class="row-address row-address-error" role="alert">
+            Not found on the map — pick a suggestion, paste a Maps link, or type lat,lng.
+          </p>
 
           <ul
             v-if="
@@ -264,7 +361,7 @@ function formatRadius(metres) {
 
     <button type="button" class="link-btn" @click="addRow">+ Add another location</button>
 
-    <p v-if="error" class="notice error">{{ error }}</p>
+    <p v-if="error" class="notice error" role="alert">{{ error }}</p>
 
     <ul v-if="failed.length" class="notice warn">
       <li v-for="item in failed" :key="item.input">“{{ item.input }}” — {{ item.reason }}</li>

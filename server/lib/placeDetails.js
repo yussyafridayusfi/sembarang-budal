@@ -201,10 +201,10 @@ function extractImages(tags, name) {
 }
 
 /**
- * A "name" that is really a street. OSM POIs with no `name` tag used to be
- * labelled by the first part of their Nominatim address, so the cache held
- * cafes called "Jalan Garuda". Such a place has nothing to look up by name -
- * Google would only return the street - and the panel must say so instead.
+ * A "name" that is really a street: an OSM POI with no `name` tag, labelled
+ * by the first part of its address ("Jalan Garuda"). Such a place has nothing
+ * to look up by name - Google would only return the street - and the panel
+ * must say so instead.
  */
 export function isStreetLikeName(name) {
   return /^(jalan|jln?[.]?|gang|gg[.]?|blok)(?![a-z])/i.test(String(name || "").trim());
@@ -272,7 +272,7 @@ export function openStateFromHours(hours, { timeZone = "Asia/Jakarta", now = new
   const yesterdayIndex = todayIndex === 1 ? 7 : todayIndex - 1;
 
   // Still inside a range that started yesterday and runs past midnight?
-  for (const [start, end] of rangesFor(yesterdayIndex)) {
+  for (const [, end] of rangesFor(yesterdayIndex)) {
     if (end > 1440 && nowMinutes < end - 1440) {
       return { openNow: true, statusText: `Buka · Tutup pukul ${fmt(end)}` };
     }
@@ -313,49 +313,66 @@ function hoursFromCard(card) {
   return card.openingHours.map((entry) => `${DAY_LABELS[entry.dayIndex] || entry.day}: ${entry.text}`);
 }
 
-export async function buildPlaceDetails({ id, lat, lng, name, type, googleId = "", placeId = "", address = "" }) {
-  const store = getStore();
-  let stored = id ? store.getPlaceById(id) : null;
+/**
+ * Rebuild a place row from its OSM element when the cache no longer holds it
+ * (bookmark, shared link, an evicted area), and cache it again. Null when the
+ * id is not an OSM id or the element cannot be read.
+ */
+async function recordFromOsmElement({ id, lat, lng, name, type }) {
+  const parsed = parseOsmId(id);
 
-  // The cache is per-area, so a place can be requested (bookmark, shared link,
-  // an area that has since been evicted) without being cached. Rebuild it from
-  // the OSM element itself rather than answering "Unnamed place".
-  if (!stored) {
-    const parsed = parseOsmId(id);
-
-    if (parsed) {
-      const element = await fetchOsmElement(parsed.osmType, parsed.osmId);
-
-      if (element) {
-        const elementLat = Number(element.lat ?? element.center?.lat ?? lat);
-        const elementLng = Number(element.lon ?? element.center?.lon ?? lng);
-        const tags = element.tags || {};
-
-        if (Number.isFinite(elementLat) && Number.isFinite(elementLng)) {
-          stored = {
-            id,
-            osmType: parsed.osmType,
-            osmId: parsed.osmId,
-            name: tags.name || name || "Unnamed place",
-            lat: elementLat,
-            lng: elementLng,
-            categoryId: describeTags(tags)?.categoryId || "other",
-            tagKey: describeTags(tags)?.key || null,
-            tagValue: describeTags(tags)?.value || type || "place",
-            tags,
-            address: "",
-            source: "osm-api"
-          };
-
-          try {
-            store.upsertPlaces([stored]);
-          } catch (error) {
-            console.warn(`[details] could not cache ${id}: ${error.message}`);
-          }
-        }
-      }
-    }
+  if (!parsed) {
+    return null;
   }
+
+  const element = await fetchOsmElement(parsed.osmType, parsed.osmId);
+
+  if (!element) {
+    return null;
+  }
+
+  const elementLat = Number(element.lat ?? element.center?.lat ?? lat);
+  const elementLng = Number(element.lon ?? element.center?.lon ?? lng);
+
+  if (!Number.isFinite(elementLat) || !Number.isFinite(elementLng)) {
+    return null;
+  }
+
+  const tags = element.tags || {};
+  const described = describeTags(tags);
+  const record = {
+    id,
+    osmType: parsed.osmType,
+    osmId: parsed.osmId,
+    name: tags.name || name || "Unnamed place",
+    lat: elementLat,
+    lng: elementLng,
+    categoryId: described?.categoryId || "other",
+    tagKey: described?.key || null,
+    tagValue: described?.value || type || "place",
+    tags,
+    address: "",
+    source: "osm-api"
+  };
+
+  try {
+    getStore().upsertPlaces([record]);
+  } catch (error) {
+    console.warn(`[details] could not cache ${id}: ${error.message}`);
+  }
+
+  return record;
+}
+
+/**
+ * The place as we know it: the cached row, or the OSM element when the row is
+ * missing (bookmark, shared link, an evicted area), with the full tag set and
+ * an address filled in. Returns `{ stored, resolved }`; `stored` is null for
+ * a bare coordinate.
+ */
+async function resolvePlaceRecord({ id, lat, lng, name, type, address }) {
+  const store = getStore();
+  const stored = (id ? store.getPlaceById(id) : null) || (await recordFromOsmElement({ id, lat, lng, name, type }));
 
   const resolved = {
     id: stored?.id || id || `point/${lat},${lng}`,
@@ -365,18 +382,19 @@ export async function buildPlaceDetails({ id, lat, lng, name, type, googleId = "
     categoryId: stored?.categoryId || "other",
     tagValue: stored?.tagValue || type || "place",
     tags: stored?.tags || {},
-    address: stored?.address || address || ""
+    address: stored?.address || address || "",
+    // The address came from a reverse lookup rather than the cached row.
+    addressFromNominatim: false
   };
 
-  const cacheKey = resolved.id;
+  return { stored, resolved };
+}
 
-  if (detailCache.has(cacheKey)) {
-    return detailCache.get(cacheKey);
-  }
-
+/** Fill in the full OSM tag set and an address where the record lacks them. */
+async function enrichPlaceRecord({ stored, resolved }) {
+  const store = getStore();
   let tags = resolved.tags || {};
 
-  // Nothing worth showing yet - go and get the full tag set from OSM.
   if (stored?.osmId && !hasDetailTags(tags)) {
     const fullTags = await fetchOsmTags(stored.osmType, stored.osmId);
 
@@ -393,15 +411,83 @@ export async function buildPlaceDetails({ id, lat, lng, name, type, googleId = "
 
   resolved.tags = tags;
 
-  // Reverse geocode only when nothing else gave us an address.
   if (!resolved.address) {
     try {
       const reverse = await reverseGeocode(resolved.lat, resolved.lng, { timeoutMs: 6000 });
       resolved.address = reverse?.display_name || "";
+      resolved.addressFromNominatim = Boolean(resolved.address);
     } catch {
       resolved.address = "";
     }
   }
+}
+
+/** Deep links for the sheet's buttons; the OSM edit link is where a missing
+ * name gets fixed for good, for this app and every other OSM-based one. */
+function buildLinks({ resolved, stored, card, google }) {
+  const osmPath = stored?.osmId ? `${stored.osmType}/${stored.osmId}` : "";
+
+  return {
+    googleMaps:
+      google?.googleMapsUri ||
+      (card?.placeId
+        ? `https://www.google.com/maps/place/?q=place_id:${card.placeId}`
+        : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+            `${resolved.name} ${resolved.lat},${resolved.lng}`
+          )}`),
+    directions: `https://www.google.com/maps/dir/?api=1&destination=${resolved.lat},${resolved.lng}`,
+    openStreetMap: osmPath
+      ? `https://www.openstreetmap.org/${osmPath}`
+      : `https://www.openstreetmap.org/#map=18/${resolved.lat}/${resolved.lng}`,
+    editOpenStreetMap: osmPath
+      ? `https://www.openstreetmap.org/edit?${stored.osmType}=${stored.osmId}`
+      : `https://www.openstreetmap.org/edit#map=19/${resolved.lat}/${resolved.lng}`
+  };
+}
+
+/** What is missing and why, so the panel can say it in one honest line. */
+function buildLimitations({ card, maps, mapsError, google, unnamed, cardError }) {
+  const lines = [];
+
+  if (card && (!maps || maps.thin) && !google) {
+    lines.push(
+      mapsError
+        ? `The place's Google Maps listing could not be read (${mapsError}); photos, price and reviews may be missing.`
+        : "Google served a trimmed version of this place's listing; photos, price and reviews may be missing. Open it again in a moment."
+    );
+  }
+
+  if (unnamed && !google?.name) {
+    lines.push(
+      "This place has no name in OpenStreetMap - it is shown by its street - so there is nothing to look up. If you know it, add its name on OpenStreetMap."
+    );
+  }
+
+  if (googleMapsResolverEnabled() && !card && !maps && !unnamed) {
+    lines.push(
+      cardError
+        ? `Google Maps could not be reached for this place (${cardError}); rating, hours and contact may be missing.`
+        : "No Google Maps listing matched this place closely enough to trust, so only OpenStreetMap data is shown."
+    );
+  }
+
+  if (!googleMapsResolverEnabled() && !googlePlacesApiEnabled()) {
+    lines.push("Google Maps lookups are switched off (GOOGLE_MAPS_RESOLVER=0); only OpenStreetMap data is shown.");
+  }
+
+  return lines;
+}
+
+export async function buildPlaceDetails({ id, lat, lng, name, type, googleId = "", placeId = "", address = "" }) {
+  const { stored, resolved } = await resolvePlaceRecord({ id, lat, lng, name, type, address });
+  const cacheKey = resolved.id;
+
+  if (detailCache.has(cacheKey)) {
+    return detailCache.get(cacheKey);
+  }
+
+  await enrichPlaceRecord({ stored, resolved });
+  const tags = resolved.tags;
 
   // --- Google Maps card: rating, count, phone, website, hours, Place ID -----
   const unnamed = !resolved.name || resolved.name === "Unnamed place" || isStreetLikeName(resolved.name);
@@ -578,7 +664,7 @@ export async function buildPlaceDetails({ id, lat, lng, name, type, googleId = "
 
   const dataSources = [
     "OpenStreetMap",
-    ...(resolved.address && !stored?.address ? ["Nominatim"] : []),
+    ...(resolved.addressFromNominatim ? ["Nominatim"] : []),
     ...(card || maps ? ["Google Maps"] : []),
     ...(google ? ["Google Places API"] : []),
     ...(images.some((image) => image.credit === "Wikimedia Commons") ? ["Wikimedia Commons"] : [])
@@ -595,24 +681,7 @@ export async function buildPlaceDetails({ id, lat, lng, name, type, googleId = "
     images,
     facts: extractFacts(tags),
     contacts,
-    links: {
-      googleMaps:
-        google?.googleMapsUri ||
-        (card?.placeId
-          ? `https://www.google.com/maps/place/?q=place_id:${card.placeId}`
-          : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-              `${resolved.name} ${resolved.lat},${resolved.lng}`
-            )}`),
-      directions: `https://www.google.com/maps/dir/?api=1&destination=${resolved.lat},${resolved.lng}`,
-      openStreetMap: stored?.osmId
-        ? `https://www.openstreetmap.org/${stored.osmType}/${stored.osmId}`
-        : `https://www.openstreetmap.org/#map=18/${resolved.lat}/${resolved.lng}`,
-      // Where a missing name gets fixed for good - for this app and every other
-      // OSM-based one.
-      editOpenStreetMap: stored?.osmId
-        ? `https://www.openstreetmap.org/edit?${stored.osmType}=${stored.osmId}`
-        : `https://www.openstreetmap.org/edit#map=19/${resolved.lat}/${resolved.lng}`
-    },
+    links: buildLinks({ resolved, stored, card, google }),
     // True when the only "name" we have is a street or nothing at all.
     unnamed: unnamed && !google?.name,
     // `null` means "we genuinely do not know", which the UI renders as such
@@ -652,31 +721,7 @@ export async function buildPlaceDetails({ id, lat, lng, name, type, googleId = "
     dataSources,
     hasRichData:
       Boolean(google) || Boolean(maps) || Boolean(card) || images.length > 0 || Object.values(contacts).some(Boolean),
-    // What is missing and why, so the panel can say it in one honest line.
-    limitations: [
-      ...(card && (!maps || maps.thin) && !google
-        ? [
-            mapsError
-              ? `The place's Google Maps listing could not be read (${mapsError}); photos, price and reviews may be missing.`
-              : "Google served a trimmed version of this place's listing; photos, price and reviews may be missing. Open it again in a moment."
-          ]
-        : []),
-      ...(unnamed && !google?.name
-        ? [
-            "This place has no name in OpenStreetMap - it is shown by its street - so there is nothing to look up. If you know it, add its name on OpenStreetMap."
-          ]
-        : []),
-      ...(googleMapsResolverEnabled() && !card && !maps && !unnamed
-        ? [
-            cardError
-              ? `Google Maps could not be reached for this place (${cardError}); rating, hours and contact may be missing.`
-              : "No Google Maps listing matched this place closely enough to trust, so only OpenStreetMap data is shown."
-          ]
-        : []),
-      ...(!googleMapsResolverEnabled() && !googlePlacesApiEnabled()
-        ? ["Google Maps lookups are switched off (GOOGLE_MAPS_RESOLVER=0); only OpenStreetMap data is shown."]
-        : [])
-    ]
+    limitations: buildLimitations({ card, maps, mapsError, google, unnamed, cardError })
   };
 
   if (detailCache.size >= DETAIL_CACHE_MAX) {
