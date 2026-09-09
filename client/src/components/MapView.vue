@@ -35,6 +35,10 @@ const emit = defineEmits([
   "use-my-location"
 ]);
 
+/** Indonesia: the view before a centre is chosen, and the one a reset flies
+ * back to. */
+const DEFAULT_VIEW = { center: [-2.5, 118], zoom: 5 };
+
 const mapElement = ref(null);
 const moved = ref(false);
 const draggingRadius = ref(false);
@@ -174,6 +178,15 @@ function isAnimating() {
 }
 
 /* ---------------------------------------------------------------- layers */
+
+/** Take the centre dot, its ring and the radius handle off the map. Without
+ * this they stay behind on a map that no longer has a centre. */
+function clearCenter() {
+  [circleLayer, centerMarker, radiusHandle].forEach((layer) => layer?.remove());
+  circleLayer = null;
+  centerMarker = null;
+  radiusHandle = null;
+}
 
 function drawCenter() {
   if (!map || !props.center) {
@@ -417,9 +430,8 @@ function zoomOut() {
 onMounted(() => {
   map = L.map(mapElement.value, {
     zoomControl: false,
-    // Indonesia by default; replaced as soon as a centre is chosen.
-    center: [-2.5, 118],
-    zoom: 5,
+    center: DEFAULT_VIEW.center,
+    zoom: DEFAULT_VIEW.zoom,
     zoomSnap: 0.5,
     wheelPxPerZoomLevel: 90
   });
@@ -539,9 +551,18 @@ watch(
   () => [props.center?.lat, props.center?.lng, props.radius],
   () => {
     liveRadius.value = props.radius;
+    moved.value = false;
+
+    // The centre was cleared: strip the overlay and go back to the opening view.
+    if (!props.center) {
+      clearCenter();
+      map?.closePopup();
+      map?.flyTo(DEFAULT_VIEW.center, DEFAULT_VIEW.zoom, { duration: 0.7 });
+      return;
+    }
+
     drawCenter();
     fitToRadius(true);
-    moved.value = false;
   }
 );
 

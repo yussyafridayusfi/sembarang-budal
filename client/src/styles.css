@@ -170,7 +170,9 @@ button {
   top: 0;
   z-index: 5;
   display: grid;
-  grid-template-columns: auto 1fr;
+  /* mark · title · actions. With two columns the action buttons wrapped into
+     the logo's narrow column. */
+  grid-template-columns: auto 1fr auto;
   gap: 4px 12px;
   align-items: center;
   margin: 0 -16px;
@@ -965,7 +967,9 @@ kbd {
 
 .results-header {
   position: sticky;
-  top: 108px; /* below the brand header */
+  /* Set from the brand's measured height in App.vue: a hand-written offset
+     broke silently whenever the header gained a row. */
+  top: var(--brand-height, 108px);
   z-index: 4;
   display: flex;
   align-items: center;
@@ -2359,8 +2363,7 @@ ul.notice.warn {
   }
 
   .mode-tabs {
-    grid-column: auto;
-    margin-top: 0;
+    margin-top: 4px;
   }
 
   .mode-tabs button {
@@ -2368,9 +2371,6 @@ ul.notice.warn {
     font-size: 0.74rem;
   }
 
-  .results-header {
-    top: 62px;
-  }
 
   .map-hint {
     display: none;
@@ -2887,23 +2887,89 @@ ul.notice.warn {
   }
 }
 
-/* Install as an app (shown only while the browser offers it). */
-.install-btn {
+/* Header actions: install the app, or clear everything and start again. */
+.brand-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.install-btn,
+.reset-btn {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  align-self: start;
   padding: 5px 10px;
   font-size: 0.74rem;
   font-weight: 600;
-  color: var(--accent);
-  background: var(--accent-soft);
   border: 1px solid transparent;
   border-radius: 999px;
 }
 
+/* Install is shown only while the browser offers it. */
+.install-btn {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
 .install-btn:hover {
   border-color: var(--accent);
+}
+
+.reset-btn {
+  color: var(--text-soft);
+  background: var(--panel-soft);
+}
+
+.reset-btn:hover,
+.reset-btn[aria-expanded="true"] {
+  color: var(--danger);
+  background: #fdecec;
+  border-color: #f3c4c4;
+}
+
+.reset-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--text);
+  background: #fdecec;
+  border: 1px solid #f3c4c4;
+  border-radius: 10px;
+}
+
+.reset-confirm p {
+  margin: 0;
+}
+
+.reset-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.primary-btn.danger {
+  padding: 8px 12px;
+  font-size: 0.82rem;
+  background: var(--danger);
+}
+
+.primary-btn.danger:hover:not(:disabled) {
+  background: #a51f1f;
+}
+
+/* Phones: the labels would crowd the title out, so the icons carry it. */
+@media (max-width: 720px) {
+  .brand-actions .btn-label {
+    display: none;
+  }
+
+  .brand-actions button {
+    padding: 7px;
+  }
 }
 
 /* Phones with a home indicator: keep the sheet and map controls above it. */

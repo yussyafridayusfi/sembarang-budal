@@ -6,6 +6,7 @@ import PlaceResults from "./components/PlaceResults.vue";
 import PlaceDetailModal from "./components/PlaceDetailModal.vue";
 import MeetingPointPanel from "./components/MeetingPointPanel.vue";
 import {
+  clearSavedRoute,
   fetchCategories,
   fetchNearbyPlaces,
   fetchPlaceDetails,
@@ -14,6 +15,7 @@ import {
 } from "./services/api";
 
 const DEFAULT_CATEGORIES = ["food", "cafe", "shopping", "attraction", "outdoor"];
+const DEFAULT_RADIUS = 2000;
 const RECENT_KEY = "sembarang-budal:recent";
 const SIDEBAR_WIDTH = 420;
 const MOBILE_BREAKPOINT = 720;
@@ -33,7 +35,7 @@ const viewCenter = ref({
 });
 const searchBias = computed(() => center.value || viewCenter.value);
 const centerLabel = ref("");
-const radius = ref(2000);
+const radius = ref(DEFAULT_RADIUS);
 const keyword = ref("");
 
 const result = ref(null);
@@ -43,6 +45,7 @@ const error = ref("");
 
 const routeLocations = ref([]);
 const routeCenter = ref(null);
+const routeSuggestedRadius = ref(DEFAULT_RADIUS);
 
 /* ---------------------------------------------------------- install (PWA) */
 
@@ -71,7 +74,6 @@ async function installApp() {
   await prompt.userChoice.catch(() => null);
   installPrompt.value = null;
 }
-const routeSuggestedRadius = ref(2000);
 
 const selectedPlace = ref(null);
 const selectedDetails = ref(null);
@@ -89,8 +91,104 @@ const insetLeft = computed(() => (!isMobile.value && sidebarOpen.value ? SIDEBAR
 
 const recent = ref(loadRecent());
 
+/** The sticky brand header, measured so the results header can sit right
+ * below it whatever the header currently contains. */
+const brandElement = ref(null);
+let brandObserver = null;
+
 const detailsCache = new Map();
 let searchController = null;
+
+/* -------------------------------------------------------------- start over */
+
+/** Bumped on a reset: remounting the panels drops the text, suggestions and
+ * half-filled rows they keep locally, which clearing the shared state alone
+ * would leave behind. */
+const resetToken = ref(0);
+const resetConfirm = ref(false);
+const resetting = ref(false);
+
+/** What a reset would actually clear, named so the confirmation can list it. */
+const resetItems = computed(() => {
+  const items = [];
+
+  if (center.value || result.value) {
+    items.push("the current search");
+  }
+
+  if (recent.value.length) {
+    items.push(`${recent.value.length} recent ${recent.value.length === 1 ? "centre" : "centres"}`);
+  }
+
+  if (routeLocations.value.length) {
+    items.push(
+      `${routeLocations.value.length} saved meeting-point ${routeLocations.value.length === 1 ? "location" : "locations"}`
+    );
+  }
+
+  return items;
+});
+
+const canReset = computed(() => resetItems.value.length > 0 || keyword.value.trim().length > 0);
+
+const resetSummary = computed(() => {
+  const items = resetItems.value;
+
+  if (items.length <= 1) {
+    return items[0] || "the current search";
+  }
+
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+});
+
+/**
+ * Back to how the app opens: no centre, default radius and categories, no
+ * results, no recent centres, and no saved meeting-point route. The saved
+ * route lives on the server, so that one is a request.
+ */
+async function resetAll() {
+  resetting.value = true;
+  searchController?.abort();
+  searchController = null;
+
+  center.value = null;
+  centerLabel.value = "";
+  radius.value = DEFAULT_RADIUS;
+  selectedCategories.value = [...DEFAULT_CATEGORIES];
+  keyword.value = "";
+  result.value = null;
+  error.value = "";
+  loading.value = false;
+
+  detailOpen.value = false;
+  selectedPlace.value = null;
+  selectedDetails.value = null;
+  detailError.value = "";
+  hoveredPlaceId.value = "";
+  detailsCache.clear();
+
+  clearRecent();
+
+  try {
+    await clearSavedRoute();
+  } catch {
+    // The local copy is gone either way, and the next save overwrites the
+    // server's - not worth blocking the reset over.
+  }
+
+  routeLocations.value = [];
+  routeCenter.value = null;
+  routeSuggestedRadius.value = DEFAULT_RADIUS;
+
+  mode.value = "explore";
+  sidebarOpen.value = true;
+  sheetState.value = "half";
+  history.replaceState(null, "", window.location.pathname);
+
+  resetToken.value += 1;
+  resetConfirm.value = false;
+  resetting.value = false;
+}
 
 const selectedPlaceId = computed(() => selectedPlace.value?.id || "");
 const places = computed(() => result.value?.places || []);
@@ -384,6 +482,11 @@ function onResize() {
 }
 
 function onGlobalKeydown(event) {
+  if (event.key === "Escape" && resetConfirm.value) {
+    resetConfirm.value = false;
+    return;
+  }
+
   if (event.key === "Escape" && !detailOpen.value && selectedPlace.value) {
     selectedPlace.value = null;
   }
@@ -400,6 +503,13 @@ onMounted(async () => {
   window.addEventListener("resize", onResize);
   document.addEventListener("keydown", onGlobalKeydown);
 
+  if (brandElement.value && window.ResizeObserver) {
+    brandObserver = new ResizeObserver(([entry]) => {
+      document.documentElement.style.setProperty("--brand-height", `${entry.target.offsetHeight}px`);
+    });
+    brandObserver.observe(brandElement.value);
+  }
+
   const fromHash = readHash();
 
   if (fromHash.radius) radius.value = fromHash.radius;
@@ -414,6 +524,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  brandObserver?.disconnect();
   window.removeEventListener("resize", onResize);
   document.removeEventListener("keydown", onGlobalKeydown);
   window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
@@ -480,7 +591,7 @@ if (launchParams.toString()) {
         <span></span>
       </button>
 
-      <header class="brand">
+      <header ref="brandElement" class="brand">
         <div class="brand-mark" aria-hidden="true">
           <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M12 2a7 7 0 0 0-7 7c0 5.25 7 13 7 13s7-7.75 7-13a7 7 0 0 0-7-7m0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5"/></svg>
         </div>
@@ -488,16 +599,32 @@ if (launchParams.toString()) {
           <h1>Sembarang Budal</h1>
           <p>Somewhere to go, anywhere inside a radius you choose.</p>
         </div>
-        <button
-          v-if="installPrompt && !installed"
-          type="button"
-          class="install-btn"
-          title="Install as an app on this device"
-          @click="installApp"
-        >
-          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M5 20h14v-2H5zm7-18-5.5 5.5 1.41 1.41L11 5.83V16h2V5.83l3.09 3.08 1.41-1.41z" transform="rotate(180 12 12)"/></svg>
-          Install
-        </button>
+
+        <div class="brand-actions">
+          <button
+            v-if="installPrompt && !installed"
+            type="button"
+            class="install-btn"
+            title="Install as an app on this device"
+            @click="installApp"
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M5 20h14v-2H5zm7-18-5.5 5.5 1.41 1.41L11 5.83V16h2V5.83l3.09 3.08 1.41-1.41z" transform="rotate(180 12 12)"/></svg>
+            <span class="btn-label">Install</span>
+          </button>
+
+          <button
+            v-if="canReset"
+            type="button"
+            class="reset-btn"
+            :aria-expanded="resetConfirm"
+            title="Start over — clears the search, recent centres and saved locations"
+            aria-label="Start over"
+            @click="resetConfirm = !resetConfirm"
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M12 5V1L7 6l5 5V7a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8"/></svg>
+            <span class="btn-label">Start over</span>
+          </button>
+        </div>
         <nav class="mode-tabs" role="tablist" aria-label="Mode">
           <button
             type="button"
@@ -521,6 +648,21 @@ if (launchParams.toString()) {
       </header>
 
       <transition name="fold">
+        <div v-if="resetConfirm" class="reset-confirm" role="alertdialog" aria-label="Start over">
+          <p>
+            <strong>Start over?</strong>
+            This clears {{ resetSummary }}. It cannot be undone.
+          </p>
+          <div class="reset-actions">
+            <button type="button" class="primary-btn danger" :disabled="resetting" @click="resetAll">
+              {{ resetting ? "Clearing…" : "Clear everything" }}
+            </button>
+            <button type="button" class="link-btn" @click="resetConfirm = false">Cancel</button>
+          </div>
+        </div>
+      </transition>
+
+      <transition name="fold">
         <p v-if="error" class="notice error" role="alert">
           {{ error }}
           <button type="button" class="notice-dismiss" aria-label="Dismiss" @click="error = ''">×</button>
@@ -529,6 +671,7 @@ if (launchParams.toString()) {
 
       <template v-if="mode === 'explore'">
         <PlaceSearchPanel
+          :key="resetToken"
           :center="center"
           :center-label="centerLabel"
           :radius="radius"
@@ -575,6 +718,7 @@ if (launchParams.toString()) {
 
       <MeetingPointPanel
         v-else
+        :key="resetToken"
         :locations="routeLocations"
         :center="routeCenter"
         :map-center="searchBias"
