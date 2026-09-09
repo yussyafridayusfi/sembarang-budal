@@ -146,3 +146,6 @@ vite.config.ts.timestamp-*
 data/*.db
 data/*.db-*
 data/places.json
+
+# aislop local score history
+.aislop/history.jsonl
