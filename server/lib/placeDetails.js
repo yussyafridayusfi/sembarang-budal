@@ -446,7 +446,7 @@ function buildLinks({ resolved, stored, card, google }) {
 }
 
 /** What is missing and why, so the panel can say it in one honest line. */
-function buildLimitations({ card, maps, mapsError, google, unnamed, cardError }) {
+function buildLimitations({ card, maps, mapsError, google, unnamed, cardError, baseLabel = "OpenStreetMap" }) {
   const lines = [];
 
   if (card && (!maps || maps.thin) && !google) {
@@ -467,12 +467,12 @@ function buildLimitations({ card, maps, mapsError, google, unnamed, cardError })
     lines.push(
       cardError
         ? `Google Maps could not be reached for this place (${cardError}); rating, hours and contact may be missing.`
-        : "No Google Maps listing matched this place closely enough to trust, so only OpenStreetMap data is shown."
+        : `No Google Maps listing matched this place closely enough to trust, so only ${baseLabel} data is shown.`
     );
   }
 
   if (!googleMapsResolverEnabled() && !googlePlacesApiEnabled()) {
-    lines.push("Google Maps lookups are switched off (GOOGLE_MAPS_RESOLVER=0); only OpenStreetMap data is shown.");
+    lines.push(`Google Maps lookups are switched off (GOOGLE_MAPS_RESOLVER=0); only ${baseLabel} data is shown.`);
   }
 
   return lines;
@@ -638,6 +638,10 @@ export async function buildPlaceDetails({ id, lat, lng, name, type, googleId = "
   const openNow = google?.openNow ?? openState?.openNow ?? maps?.openNow ?? card?.openNow ?? null;
   const priceRange = google?.priceRange || maps?.price?.label || null;
 
+  // Tag-derived fields belong to whichever dataset the row came from.
+  const baseSource = stored?.source === "overture" ? "overture" : "osm";
+  const baseLabel = baseSource === "overture" ? "Overture Maps" : "OpenStreetMap";
+
   /** Where each headline field came from, for the UI to print beside it. */
   const provenance = {
     rating: google?.rating != null ? "google-places" : rating != null ? "google-maps" : null,
@@ -648,22 +652,22 @@ export async function buildPlaceDetails({ id, lat, lng, name, type, googleId = "
       : maps?.openingHours?.length >= 7 || card?.openingHours?.length
         ? "google-maps"
         : tags.opening_hours
-          ? "osm"
+          ? baseSource
           : null,
-    phone: google?.phone ? "google-places" : maps?.phone || card?.phone ? "google-maps" : contacts.phone ? "osm" : null,
+    phone: google?.phone ? "google-places" : maps?.phone || card?.phone ? "google-maps" : contacts.phone ? baseSource : null,
     website: google?.website
       ? "google-places"
       : maps?.website || card?.website
         ? "google-maps"
         : contacts.website
-          ? "osm"
+          ? baseSource
           : null,
-    photos: google?.photos?.length ? "google-places" : maps?.photos?.length ? "google-maps" : images.length ? "osm" : null,
+    photos: google?.photos?.length ? "google-places" : maps?.photos?.length ? "google-maps" : images.length ? baseSource : null,
     reviews: google?.reviews?.length ? "google-places" : reviews.length ? "google-maps" : null
   };
 
   const dataSources = [
-    "OpenStreetMap",
+    baseLabel,
     ...(resolved.addressFromNominatim ? ["Nominatim"] : []),
     ...(card || maps ? ["Google Maps"] : []),
     ...(google ? ["Google Places API"] : []),
@@ -721,7 +725,7 @@ export async function buildPlaceDetails({ id, lat, lng, name, type, googleId = "
     dataSources,
     hasRichData:
       Boolean(google) || Boolean(maps) || Boolean(card) || images.length > 0 || Object.values(contacts).some(Boolean),
-    limitations: buildLimitations({ card, maps, mapsError, google, unnamed, cardError })
+    limitations: buildLimitations({ card, maps, mapsError, google, unnamed, cardError, baseLabel })
   };
 
   if (detailCache.size >= DETAIL_CACHE_MAX) {

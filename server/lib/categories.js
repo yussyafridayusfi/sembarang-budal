@@ -102,6 +102,42 @@ export const CATEGORY_GROUPS = [
     searchTerms: ["rumah sakit", "apotek", "bank", "pom bensin", "puskesmas"]
   },
   {
+    // Things you go to get fixed, washed, cut or cleaned: the bengkel and
+    // tambal ban that every Indonesian street has, and the phone, laptop and
+    // appliance repairers, laundries, barbers and salons next to them.
+    id: "service",
+    label: "Services & repair",
+    icon: "service",
+    tags: [
+      [
+        "shop",
+        [
+          "car_repair",
+          "motorcycle_repair",
+          "tyres",
+          "car_parts",
+          "motorcycle_parts",
+          "bicycle",
+          "mobile_phone",
+          "computer",
+          "appliance",
+          "electronics_repair",
+          "laundry",
+          "dry_cleaning",
+          "tailor",
+          "copyshop",
+          "hairdresser",
+          "beauty",
+          "locksmith",
+          "optician"
+        ]
+      ],
+      ["amenity", ["car_wash", "vehicle_inspection", "car_rental", "bicycle_repair_station"]],
+      ["craft", ["electronics_repair", "shoemaker", "tailor", "watchmaker", "key_cutter", "upholsterer"]]
+    ],
+    searchTerms: ["bengkel", "tambal ban", "servis", "service", "cuci mobil", "cuci motor", "laundry", "salon", "barbershop", "reparasi"]
+  },
+  {
     id: "transport",
     label: "Transport",
     icon: "transport",

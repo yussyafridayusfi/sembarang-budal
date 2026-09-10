@@ -7,6 +7,9 @@
 - `npm start` — Express serving `dist/` + the API on :3000
 - `npm run ingest -- --area "<city>" --radius <m>` — pre-scrape places into the DB
 - `npm run stats` — what the place database currently holds
+- `node scripts/import-overture.js <places.geojsonseq> [--export data/seed.json]`
+  — load an Overture Maps places extract (from the `overturemaps` Python CLI)
+  into the cache; categories mapped by rule, no coverage marked
 - `npm run slop` — aislop quality gate (AI-slop patterns, complexity, lint,
   security); `npm run slop:fix` applies the mechanical fixes. Config in
   `.aislop/config.yml`; `docs/` and `dist/` are built bundles and excluded.
@@ -145,6 +148,12 @@ There is no test script.
   ratings; keep `basedOn` and `reviewCount` apart in the UI.
 - **Never invent place data.** Missing ratings, photos and phone numbers are
   reported as unknown, not filled in with plausible values.
+- **Upstream plumbing is not shown to the person.** Failed Photon queries and
+  background collection are retried by `App.vue` (20 s for the categories
+  that did not complete, 75 s for the background fill, immediately when a place
+  is opened) and merged into the list. The results header shows only "Still
+  looking…" / "Updating…" and a refresh button - never query counts or source
+  names.
 - **The results header sticks below the brand, so its offset is measured.**
   `.results-header`'s `top` reads `var(--brand-height)`, set from the header's
   real height by a `ResizeObserver` in `App.vue`. It was a hand-written 108px
