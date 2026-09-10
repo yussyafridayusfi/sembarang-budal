@@ -17,6 +17,7 @@ export const CATEGORY_COLORS = {
   essential: "#e03131",
   transport: "#495057",
   education: "#1098ad",
+  service: "#a05a2c",
   other: "#868e96"
 };
 
@@ -33,6 +34,7 @@ export const CATEGORY_ICONS = {
   essential: "🏥",
   transport: "🚉",
   education: "🎓",
+  service: "🔧",
   other: "📍"
 };
 

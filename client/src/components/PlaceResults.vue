@@ -14,6 +14,8 @@ const props = defineProps({
   result: { type: Object, default: null },
   categories: { type: Array, default: () => [] },
   loading: { type: Boolean, default: false },
+  /** A quiet re-fetch is running behind the list that is already shown. */
+  refreshing: { type: Boolean, default: false },
   selectedPlaceId: { type: String, default: "" },
   hoveredPlaceId: { type: String, default: "" }
 });
@@ -74,40 +76,18 @@ function toggleFilter(categoryId) {
   filterCategory.value = filterCategory.value === categoryId ? "" : categoryId;
 }
 
-const diagnostics = computed(() => props.result?.diagnostics || null);
-
-/** Shown when a live fetch came back thin, so the user knows why. */
-const partialNotice = computed(() => {
-  const failures = diagnostics.value?.failures || [];
-
-  if (!failures.length) {
-    return "";
-  }
-
-  return `${failures.length} upstream ${failures.length === 1 ? "query" : "queries"} failed or timed out. Results may be incomplete.`;
-});
-
 /**
- * A cold area is queried for each category's defining tags only, so the first
- * search is fast. Saying so beats letting the list look complete when the
- * long tail is still being fetched.
+ * Whether more places may still arrive: an upstream query failed or the
+ * long tail is being collected in the background. The app retries on its
+ * own (see App.vue); the list only shows that it is still looking, never the
+ * plumbing behind it.
  */
-const fillingIn = computed(() => {
-  const diag = diagnostics.value;
+const stillLooking = computed(() => {
+  const diag = props.result?.diagnostics;
 
-  if (!diag?.liveFetch) {
-    return "";
-  }
-
-  if (diag.backgroundQueued) {
-    return "First search here — still collecting the less common place types in the background. Search again in a minute for more.";
-  }
-
-  if (diag.pendingJobs > 0) {
-    return `${diag.pendingJobs} further queries did not fit in the time budget. Refresh for more.`;
-  }
-
-  return "";
+  return Boolean(
+    diag?.liveFetch && ((diag.failures || []).length || diag.backgroundQueued || diag.pendingJobs > 0)
+  );
 });
 
 // Keep the highlighted row in view when the selection comes from the map.
@@ -161,14 +141,31 @@ const headline = computed(() => {
         <p v-else-if="loading" class="results-sub">Asking OpenStreetMap about this area</p>
       </div>
 
-      <label class="sort">
-        <span class="sr-only">Sort by</span>
-        <select v-model="sortMode">
-          <option value="distance">Nearest first</option>
-          <option value="name">A → Z</option>
-          <option value="category">By category</option>
-        </select>
-      </label>
+      <div class="results-tools">
+        <span v-if="refreshing || (stillLooking && !loading)" class="results-updating" role="status">
+          <span class="spinner" aria-hidden="true"></span>
+          {{ refreshing ? "Updating…" : "Still looking…" }}
+        </span>
+        <button
+          v-if="result && !loading"
+          type="button"
+          class="icon-round small"
+          title="Refresh results"
+          aria-label="Refresh results"
+          :disabled="refreshing"
+          @click="emit('retry-live')"
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z"/></svg>
+        </button>
+        <label class="sort">
+          <span class="sr-only">Sort by</span>
+          <select v-model="sortMode">
+            <option value="distance">Nearest first</option>
+            <option value="name">A → Z</option>
+            <option value="category">By category</option>
+          </select>
+        </label>
+      </div>
     </header>
 
     <div v-if="grouped.length && !loading" class="summary-chips" role="group" aria-label="Narrow by category">
@@ -186,13 +183,6 @@ const headline = computed(() => {
       </button>
     </div>
 
-    <p v-if="partialNotice" class="notice warn">{{ partialNotice }}</p>
-    <p v-if="fillingIn && !loading" class="notice subtle">{{ fillingIn }}</p>
-
-    <p v-if="diagnostics && !diagnostics.liveFetch && !loading" class="notice subtle cache-note">
-      <span>From the local database · {{ diagnostics.cachedCount }} places known here</span>
-      <button type="button" class="link-btn" @click="emit('retry-live')">Refresh from OpenStreetMap</button>
-    </p>
 
     <!-- Skeleton rows: the cold search takes 6–14 s and a bare label made it
          look frozen. -->
@@ -262,9 +252,9 @@ const headline = computed(() => {
       <ul>
         <li>Try a bigger radius — drag the ring's handle on the map.</li>
         <li>Select more categories; a single category in a quiet area is often empty.</li>
-        <li v-if="partialNotice">Some upstream queries failed; try refreshing.</li>
+        <li v-if="stillLooking">Still looking — more may appear in a moment.</li>
       </ul>
-      <button type="button" class="link-btn" @click="emit('retry-live')">Refresh from OpenStreetMap</button>
+      <button type="button" class="link-btn" @click="emit('retry-live')">Search again</button>
     </div>
   </section>
 </template>

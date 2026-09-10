@@ -677,6 +677,51 @@ with its resolved address. A row that cannot be placed is marked in red with
 a role="alert" notice names every such row, and nothing is saved until they are
 fixed.
 
+### Services & repair
+
+A thirteenth category for the places people go to get something fixed, washed,
+cut or cleaned: the bengkel and tambal ban on every Indonesian street, car and
+motorcycle repair, tyres, car wash, phone / laptop / appliance repair, laundry,
+tailors, barbers and salons, locksmiths, opticians. In OSM these are
+`shop=car_repair`, `shop=motorcycle_repair`, `shop=tyres`, `amenity=car_wash`,
+`craft=electronics_repair` and friends - Photon's browse near Gedangan answers
+"Aneka Motor Service", "Tambal ban", "Karunia Motor" for it, and Nominatim's
+`[shop=motorcycle_repair]` finds "HONDA Ahass" and two more "Tambal Ban". The
+chip is 🔧 in copper, and the category takes part in coverage tracking like
+any other, so a cached area that never asked for it fetches it live the first
+time it is selected.
+
+### Quiet retries instead of upstream notices
+
+The results list used to say "2 upstream queries failed or timed out. Results
+may be incomplete." and "First search here - still collecting the less common
+place types in the background", with a "Refresh from OpenStreetMap" link. True,
+and useless to someone who just wants a place to go. Those notices are gone.
+In their place:
+
+- a small "Still looking…" spinner in the results header while more may arrive;
+- the app asks again on its own: 20 s after a thin result it re-fetches only
+  the categories whose queries did not complete, 75 s after a cold search it
+  re-reads the cache the background collection has been filling, and opening a
+  place while a retry is pending runs it immediately (the person is clearly
+  staying in this area). Arrivals merge into the list; nothing shown is lost;
+  a failed retry is silent.
+- a ↻ button for anyone who wants to ask now.
+
+### Overture Maps as a seed source
+
+`scripts/import-overture.js` loads an Overture Maps *places* extract into the
+cache. Overture's places carry what OSM often lacks for small Indonesian
+businesses - a category, a website, Instagram and Facebook pages, a phone - and
+hold many shops OSM has never had. Its categories are its own taxonomy
+("automotive_repair", "tire_dealer_and_repair", "beauty_salon", "warung"…), so
+they are mapped onto ours by ordered rules, places matching none are skipped
+rather than filed as "other", and confidence below 0.5 is dropped. Coverage is
+not marked for imported tiles - Overture is not OSM, and claiming a tile as
+covered would stop the OSM sources from ever being asked about it. The extract
+itself comes from the `overturemaps` Python CLI by bounding box; pass
+`--export data/seed.json` to ship the merged store with a deployment.
+
 ### Start over
 
 Everything the app remembers can be cleared from one place. **Start over** sits

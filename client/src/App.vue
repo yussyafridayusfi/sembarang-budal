@@ -40,6 +40,9 @@ const keyword = ref("");
 
 const result = ref(null);
 const loading = ref(false);
+/** A quiet re-fetch behind results already on screen. */
+const refreshing = ref(false);
+let retryTimers = [];
 const locating = ref(false);
 const error = ref("");
 
@@ -151,6 +154,7 @@ async function resetAll() {
   searchController?.abort();
   searchController = null;
 
+  clearRetries();
   center.value = null;
   centerLabel.value = "";
   radius.value = DEFAULT_RADIUS;
@@ -321,7 +325,57 @@ async function setCenter(point, { label = "", search = true } = {}) {
   }
 }
 
-async function runSearch({ refresh = false } = {}) {
+function clearRetries() {
+  retryTimers.forEach((timer) => clearTimeout(timer));
+  retryTimers = [];
+}
+
+/**
+ * A first search on a cold area is often thin: a Photon query times out, or
+ * the long tail is still being collected in the background. Instead of a
+ * notice about upstream queries, the app quietly asks again - first for the
+ * categories that did not complete, then once more when the background
+ * collection has had time - and merges what arrives into the list.
+ */
+function scheduleRetries(response) {
+  clearRetries();
+
+  const diag = response?.diagnostics;
+
+  if (!diag?.liveFetch) {
+    return;
+  }
+
+  const covered = new Set(diag.coveredCategories || []);
+  const missing = selectedCategories.value.filter((id) => !covered.has(id));
+  const hasFailures = (diag.failures || []).length > 0 || diag.pendingJobs > 0;
+
+  if (hasFailures && missing.length) {
+    retryTimers.push(setTimeout(() => runSearch({ refresh: true, silent: true, categories: missing }), 20000));
+  }
+
+  if (diag.backgroundQueued) {
+    retryTimers.push(setTimeout(() => runSearch({ silent: true }), 75000));
+  }
+}
+
+/** Places from a quiet re-fetch join the list; nothing already shown is lost. */
+function mergeResults(current, incoming) {
+  if (!current?.places?.length) {
+    return incoming;
+  }
+
+  const byId = new Map(current.places.map((place) => [place.id, place]));
+  (incoming.places || []).forEach((place) => byId.set(place.id, place));
+
+  return {
+    ...incoming,
+    places: [...byId.values()].sort((a, b) => a.distance - b.distance),
+    diagnostics: incoming.diagnostics
+  };
+}
+
+async function runSearch({ refresh = false, silent = false, categories = null } = {}) {
   if (!center.value || !selectedCategories.value.length) {
     return;
   }
@@ -329,9 +383,14 @@ async function runSearch({ refresh = false } = {}) {
   searchController?.abort();
   searchController = new AbortController();
 
-  loading.value = true;
-  error.value = "";
-  writeHash();
+  if (silent) {
+    refreshing.value = true;
+  } else {
+    clearRetries();
+    loading.value = true;
+    error.value = "";
+    writeHash();
+  }
 
   try {
     const response = await fetchNearbyPlaces(
@@ -339,7 +398,7 @@ async function runSearch({ refresh = false } = {}) {
         lat: center.value.lat,
         lng: center.value.lng,
         radius: radius.value,
-        categories: selectedCategories.value,
+        categories: categories || selectedCategories.value,
         query: keyword.value.trim(),
         limit: 300,
         refresh
@@ -347,14 +406,29 @@ async function runSearch({ refresh = false } = {}) {
       searchController.signal
     );
 
-    result.value = response;
-  } catch (err) {
-    if (err.name !== "AbortError") {
-      error.value = err.message;
-      result.value = { places: [], radius: radius.value, diagnostics: null };
+    result.value = silent ? mergeResults(result.value, response) : response;
+
+    if (!silent || (response.diagnostics?.failures || []).length) {
+      scheduleRetries(response);
     }
+  } catch (err) {
+    if (err.name === "AbortError") {
+      return;
+    }
+
+    if (silent) {
+      // A failed quiet retry is not news; the list on screen stands.
+      return;
+    }
+
+    error.value = err.message;
+    result.value = { places: [], radius: radius.value, diagnostics: null };
   } finally {
-    loading.value = false;
+    if (silent) {
+      refreshing.value = false;
+    } else {
+      loading.value = false;
+    }
   }
 }
 
@@ -403,6 +477,13 @@ async function openDetails(place) {
   selectedPlace.value = place;
   detailOpen.value = true;
   detailError.value = "";
+
+  // A retry is pending for a thin result: do it now rather than in 20 s, since
+  // the person is clearly staying in this area.
+  if (retryTimers.length && !refreshing.value) {
+    clearRetries();
+    runSearch({ silent: true, refresh: true });
+  }
 
   if (detailsCache.has(place.id)) {
     selectedDetails.value = detailsCache.get(place.id);
@@ -524,6 +605,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  clearRetries();
   brandObserver?.disconnect();
   window.removeEventListener("resize", onResize);
   document.removeEventListener("keydown", onGlobalKeydown);
@@ -697,12 +779,13 @@ if (launchParams.toString()) {
           :result="result"
           :categories="categories"
           :loading="loading"
+          :refreshing="refreshing"
           :selected-place-id="selectedPlaceId"
           :hovered-place-id="hoveredPlaceId"
           @select-place="openDetails"
           @preview-place="previewPlace"
           @hover-place="hoveredPlaceId = $event"
-          @retry-live="runSearch({ refresh: true })"
+          @retry-live="runSearch({ refresh: true, silent: Boolean(result) })"
         />
 
         <section v-else class="welcome">

@@ -36,6 +36,7 @@
   --cat-essential: #e03131;
   --cat-transport: #495057;
   --cat-education: #1098ad;
+  --cat-service: #a05a2c;
   --cat-other: #868e96;
 
   font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
@@ -749,6 +750,7 @@ button {
 .chip-essential.active { background: var(--cat-essential); }
 .chip-transport.active { background: var(--cat-transport); }
 .chip-education.active { background: var(--cat-education); }
+.chip-service.active { background: var(--cat-service); }
 
 /* ---------- Buttons ---------- */
 
@@ -1053,6 +1055,7 @@ kbd {
 .tag-essential { background: var(--cat-essential); }
 .tag-transport { background: var(--cat-transport); }
 .tag-education { background: var(--cat-education); }
+.tag-service { background: var(--cat-service); }
 
 .place-list {
   display: flex;
@@ -3005,4 +3008,38 @@ ul.notice.warn {
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+}
+
+/* Results header tools: quiet update indicator, refresh, sort. */
+.results-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.results-updating {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  color: var(--text-soft);
+  white-space: nowrap;
+}
+
+.results-updating .spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.icon-round.small {
+  width: 30px;
+  height: 30px;
+}
+
+.icon-round.small:disabled {
+  opacity: 0.5;
 }

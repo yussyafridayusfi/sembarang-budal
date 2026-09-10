@@ -179,15 +179,18 @@ function nextImage(step) {
 
 const categoryId = computed(() => props.details?.categoryId || props.place?.categoryId || "other");
 
+/** The dataset the place's own row came from: OSM, or Overture for imported rows. */
+const baseSource = computed(() => (props.details?.dataSources?.[0] === "Overture Maps" ? "overture" : "osm"));
+
 const contactEntries = computed(() => {
   const contacts = props.details?.contacts || {};
 
   return [
     { key: "phone", label: "Phone", value: contacts.phone, href: contacts.phone ? `tel:${contacts.phone.replace(/[^\d+]/g, "")}` : "", source: props.details?.provenance?.phone },
     { key: "website", label: "Website", value: contacts.website, href: contacts.website, source: props.details?.provenance?.website },
-    { key: "instagram", label: "Instagram", value: contacts.instagram, href: contacts.instagram, source: "osm" },
-    { key: "facebook", label: "Facebook", value: contacts.facebook, href: contacts.facebook, source: "osm" },
-    { key: "email", label: "Email", value: contacts.email, href: contacts.email ? `mailto:${contacts.email}` : "", source: "osm" }
+    { key: "instagram", label: "Instagram", value: contacts.instagram, href: contacts.instagram, source: baseSource.value },
+    { key: "facebook", label: "Facebook", value: contacts.facebook, href: contacts.facebook, source: baseSource.value },
+    { key: "email", label: "Email", value: contacts.email, href: contacts.email ? `mailto:${contacts.email}` : "", source: baseSource.value }
   ].filter((entry) => entry.value);
 });
 
@@ -197,6 +200,7 @@ const SOURCE_LABELS = {
   "google-maps": "Google Maps",
   google: "Google",
   osm: "OpenStreetMap",
+  overture: "Overture Maps",
   reviews: "from reviews"
 };
 
