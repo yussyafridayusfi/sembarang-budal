@@ -36,6 +36,7 @@
   --cat-essential: #e03131;
   --cat-transport: #495057;
   --cat-education: #1098ad;
+  --cat-vehicle: #0b7285;
   --cat-service: #a05a2c;
   --cat-other: #868e96;
 
@@ -750,6 +751,7 @@ button {
 .chip-essential.active { background: var(--cat-essential); }
 .chip-transport.active { background: var(--cat-transport); }
 .chip-education.active { background: var(--cat-education); }
+.chip-vehicle.active { background: var(--cat-vehicle); }
 .chip-service.active { background: var(--cat-service); }
 
 /* ---------- Buttons ---------- */
@@ -1055,6 +1057,7 @@ kbd {
 .tag-essential { background: var(--cat-essential); }
 .tag-transport { background: var(--cat-transport); }
 .tag-education { background: var(--cat-education); }
+.tag-vehicle { background: var(--cat-vehicle); }
 .tag-service { background: var(--cat-service); }
 
 .place-list {
@@ -3042,4 +3045,79 @@ ul.notice.warn {
 
 .icon-round.small:disabled {
   opacity: 0.5;
+}
+
+/* Quick cuts inside a category: "Tambal ban 4", "Bengkel motor 31". */
+.quick-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+
+.quick-filters-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-soft);
+}
+
+.quick-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.quick-filter b {
+  padding: 0 6px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  border-radius: 999px;
+  background: var(--panel-soft);
+}
+
+.quick-filter:hover {
+  border-color: var(--pin);
+}
+
+.quick-filter.active {
+  color: #fff;
+  background: var(--pin);
+  border-color: var(--pin);
+}
+
+.quick-filter.active b {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* A row's call button sits beside "show on map". */
+.place-distance {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.place-distance .row-actions,
+.place-distance > :not(strong) {
+  margin-top: 0;
+}
+
+.row-call {
+  color: var(--success);
+}
+
+.row-call:hover {
+  color: #fff;
+  background: var(--success);
 }

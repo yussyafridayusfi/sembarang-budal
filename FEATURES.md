@@ -677,12 +677,23 @@ with its resolved address. A row that cannot be placed is marked in red with
 a role="alert" notice names every such row, and nothing is saved until they are
 fixed.
 
-### Services & repair
+### Bengkel & tambal ban, and Services & repair
 
-A thirteenth category for the places people go to get something fixed, washed,
-cut or cleaned: the bengkel and tambal ban on every Indonesian street, car and
-motorcycle repair, tyres, car wash, phone / laptop / appliance repair, laundry,
-tailors, barbers and salons, locksmiths, opticians. In OSM these are
+Two categories for the places people go to get something fixed. **🛵 Bengkel &
+tambal ban** is vehicles only - car and motorcycle workshops, tyre shops, spare
+parts, car washes (`shop=car_repair`, `motorcycle_repair`, `tyres`,
+`car_parts`, `amenity=car_wash`…) - on its own because "find a mechanic" is an
+urgent, specific need and a flat tyre wants a tambal ban, not a laundry. **🔧
+Services & repair** is the rest: phone / laptop / appliance repair, laundry,
+tailors, barbers and salons, locksmiths, opticians.
+
+Inside the results, a **Find** row offers quick cuts for whichever of the two is
+present - *Bengkel motor · Bengkel mobil · Tambal ban · Cuci kendaraan* and
+*Servis HP & laptop · Laundry · Salon & barber* - each with its count. They
+match on the place's type *and* its name, because a tambal ban is usually
+tagged `shop=tyres` or not tagged at all and simply called "Tambal Ban"; the
+Overture import brings phone numbers for most of them, and a row with a number
+gets a 📞 button that dials it straight from the list. In OSM these are
 `shop=car_repair`, `shop=motorcycle_repair`, `shop=tyres`, `amenity=car_wash`,
 `craft=electronics_repair` and friends - Photon's browse near Gedangan answers
 "Aneka Motor Service", "Tambal ban", "Karunia Motor" for it, and Nominatim's

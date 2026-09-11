@@ -1,10 +1,12 @@
 <script setup>
 import { computed, nextTick, ref, watch } from "vue";
 import {
+  QUICK_FILTERS,
   colorFor,
   displayName,
   formatDistance,
   iconFor,
+  phoneOf,
   ridingMinutes,
   typeLabel,
   walkingMinutes
@@ -25,6 +27,8 @@ const emit = defineEmits(["select-place", "preview-place", "hover-place", "retry
 const sortMode = ref("distance");
 /** A quick client-side narrowing by category, on top of the server search. */
 const filterCategory = ref("");
+/** A finer cut inside a category: "tambal ban", not "vehicle repair". */
+const quickFilter = ref("");
 const listElement = ref(null);
 
 const labelByCategory = computed(() =>
@@ -38,6 +42,10 @@ const places = computed(() => {
 
   if (filterCategory.value) {
     list = list.filter((place) => place.categoryId === filterCategory.value);
+  }
+
+  if (activeQuickFilter.value) {
+    list = list.filter(activeQuickFilter.value.match);
   }
 
   if (sortMode.value === "name") {
@@ -65,15 +73,60 @@ const grouped = computed(() => {
   })).sort((a, b) => b.total - a.total);
 });
 
-// A new result set may no longer contain the filtered category.
+/**
+ * Quick filters for the categories present in this result, each with how many
+ * places it would keep; an empty one is not offered.
+ */
+const quickFilters = computed(() =>
+  Object.entries(QUICK_FILTERS)
+    .filter(([categoryId]) => allPlaces.value.some((place) => place.categoryId === categoryId))
+    .flatMap(([categoryId, filters]) =>
+      filters.map((filter) => ({
+        ...filter,
+        key: `${categoryId}:${filter.id}`,
+        categoryId,
+        total: allPlaces.value.filter((place) => place.categoryId === categoryId && filter.match(place)).length
+      }))
+    )
+    .filter((filter) => filter.total > 0)
+);
+
+const activeQuickFilter = computed(() => quickFilters.value.find((filter) => filter.key === quickFilter.value) || null);
+
+// A new result set may no longer contain the filtered category or quick cut.
 watch(allPlaces, () => {
   if (filterCategory.value && !allPlaces.value.some((place) => place.categoryId === filterCategory.value)) {
     filterCategory.value = "";
+  }
+
+  if (quickFilter.value && !quickFilters.value.some((filter) => filter.key === quickFilter.value)) {
+    quickFilter.value = "";
   }
 });
 
 function toggleFilter(categoryId) {
   filterCategory.value = filterCategory.value === categoryId ? "" : categoryId;
+
+  // A quick cut belongs to one category; leaving that category drops it.
+  if (activeQuickFilter.value && filterCategory.value && activeQuickFilter.value.categoryId !== filterCategory.value) {
+    quickFilter.value = "";
+  }
+}
+
+function toggleQuickFilter(filter) {
+  if (quickFilter.value === filter.key) {
+    quickFilter.value = "";
+    return;
+  }
+
+  quickFilter.value = filter.key;
+  // The cut implies its category.
+  filterCategory.value = filter.categoryId;
+}
+
+function telHref(place) {
+  const phone = phoneOf(place);
+  return phone ? `tel:${phone.replace(/[^\d+]/g, "")}` : "";
 }
 
 /**
@@ -121,7 +174,7 @@ const headline = computed(() => {
 
   const total = allPlaces.value.length;
 
-  if (filterCategory.value) {
+  if (filterCategory.value || activeQuickFilter.value) {
     return `${places.value.length} of ${total} place${total === 1 ? "" : "s"}`;
   }
 
@@ -184,6 +237,23 @@ const headline = computed(() => {
     </div>
 
 
+    <div v-if="quickFilters.length && !loading" class="quick-filters" role="group" aria-label="Find">
+      <span class="quick-filters-label">Find</span>
+      <button
+        v-for="filter in quickFilters"
+        :key="filter.key"
+        type="button"
+        class="quick-filter"
+        :class="{ active: quickFilter === filter.key }"
+        :style="{ '--pin': colorFor(filter.categoryId) }"
+        :aria-pressed="quickFilter === filter.key"
+        @click="toggleQuickFilter(filter)"
+      >
+        <span aria-hidden="true">{{ filter.icon }}</span>
+        {{ filter.label }} <b>{{ filter.total }}</b>
+      </button>
+    </div>
+
     <!-- Skeleton rows: the cold search takes 6–14 s and a bare label made it
          look frozen. -->
     <ul v-if="loading" class="place-list skeleton-list" aria-hidden="true">
@@ -233,6 +303,16 @@ const headline = computed(() => {
 
         <div class="place-distance">
           <strong>{{ formatDistance(place.distance) }}</strong>
+          <a
+            v-if="telHref(place)"
+            :href="telHref(place)"
+            class="row-locate row-call"
+            :title="`Call ${phoneOf(place)}`"
+            :aria-label="`Call ${phoneOf(place)}`"
+            @click.stop
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M6.62 10.79a15.05 15.05 0 0 0 6.59 6.59l2.2-2.2a1 1 0 0 1 1.01-.24c1.12.37 2.33.57 3.58.57a1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1.02z"/></svg>
+          </a>
           <button
             type="button"
             class="row-locate"

@@ -102,9 +102,22 @@ export const CATEGORY_GROUPS = [
     searchTerms: ["rumah sakit", "apotek", "bank", "pom bensin", "puskesmas"]
   },
   {
-    // Things you go to get fixed, washed, cut or cleaned: the bengkel and
-    // tambal ban that every Indonesian street has, and the phone, laptop and
-    // appliance repairers, laundries, barbers and salons next to them.
+    // Where a vehicle gets fixed: the bengkel and tambal ban on every
+    // Indonesian street, car and motorcycle workshops, tyre shops, spare parts,
+    // car washes. Its own category because "find a mechanic" is usually an
+    // urgent, specific need - a flat tyre wants a tambal ban, not a laundry.
+    id: "vehicle",
+    label: "Bengkel & tambal ban",
+    icon: "vehicle",
+    tags: [
+      ["shop", ["car_repair", "motorcycle_repair", "tyres", "car_parts", "motorcycle_parts", "bicycle", "car", "motorcycle"]],
+      ["amenity", ["car_wash", "vehicle_inspection", "bicycle_repair_station"]]
+    ],
+    searchTerms: ["bengkel", "tambal ban", "bengkel motor", "bengkel mobil", "servis motor", "cuci mobil", "cuci motor", "ban", "oli", "ahass"]
+  },
+  {
+    // Everything else you go to get fixed, cleaned or cut: phone, laptop and
+    // appliance repairers, laundries, tailors, barbers and salons.
     id: "service",
     label: "Services & repair",
     icon: "service",
@@ -112,12 +125,6 @@ export const CATEGORY_GROUPS = [
       [
         "shop",
         [
-          "car_repair",
-          "motorcycle_repair",
-          "tyres",
-          "car_parts",
-          "motorcycle_parts",
-          "bicycle",
           "mobile_phone",
           "computer",
           "appliance",
@@ -132,10 +139,9 @@ export const CATEGORY_GROUPS = [
           "optician"
         ]
       ],
-      ["amenity", ["car_wash", "vehicle_inspection", "car_rental", "bicycle_repair_station"]],
       ["craft", ["electronics_repair", "shoemaker", "tailor", "watchmaker", "key_cutter", "upholsterer"]]
     ],
-    searchTerms: ["bengkel", "tambal ban", "servis", "service", "cuci mobil", "cuci motor", "laundry", "salon", "barbershop", "reparasi"]
+    searchTerms: ["servis", "service", "servis hp", "laundry", "salon", "barbershop", "reparasi", "tukang"]
   },
   {
     id: "transport",
