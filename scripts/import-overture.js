@@ -31,10 +31,14 @@ const MIN_CONFIDENCE = 0.5;
  * food; "karaoke" is entertainment, not nightlife) sit above the broad ones.
  */
 const RULES = [
+  // Not places anyone visits for a service: manufacturers, distributors,
+  // consultancies, government offices, "hair supply" wholesalers.
+  ["", /company|manufactur|distributor|wholesale|consultant|coaching|retirement|surgical|_supply|department_of|government|agency|office$/],
+  ["vehicle", /automotive|auto_|tire|tyre|car_wash|motorcycle|car_repair|car_dealer|car_parts|bicycle_repair|vehicle_repair|boat_service|body_shop/],
   ["cafe", /ice_cream|gelato|coffee|cafe|tea_room|tea_house|bubble_tea|boba|juice|bakery|patisserie|dessert|donut|pastry/],
   ["entertainment", /karaoke|cinema|movie|theater|theatre|arcade|bowling|gym|fitness|amusement|billiard|escape_room|water_park|golf/],
   ["nightlife", /night_club|nightclub|\bbar\b|_bar$|^bar_|pub$|brewery|lounge|hookah|shisha/],
-  ["service", /repair|tire|tyre|car_wash|auto_|automotive|vehicle|workshop|bengkel|laundry|dry_clean|barber|salon|hair|tailor|locksmith|electrician|phone_store|mobile_phone|computer|appliance|printing|copy|photocopy|optician|optical|cobbler|shoe_repair|welding|upholster/],
+  ["service", /repair|workshop|bengkel|laundry|dry_clean|barber|salon|hair|tailor|locksmith|electrician|phone_store|mobile_phone|computer|appliance|printing|copy|photocopy|optician|optical|cobbler|shoe_repair|welding|upholster/],
   ["food", /restaurant|food|warung|bbq|barbecue|noodle|seafood|pizza|burger|sushi|ramen|chicken|steak|indonesian|japanese|chinese|korean|thai|padang|satay|sate|bakso|soto|catering|diner|eatery|buffet|grill|kebab|dim_sum/],
   ["stay", /hotel|hostel|guest_house|guesthouse|motel|resort|lodging|accommodation|villa|homestay|inn$|bed_and_breakfast|apartment_hotel/],
   ["worship", /mosque|masjid|church|temple|religious|place_of_worship|buddhist|hindu|synagogue|chapel|cathedral|vihara|pura$/],
@@ -55,7 +59,7 @@ function mapCategory(primary) {
 
   for (const [id, pattern] of RULES) {
     if (pattern.test(value)) {
-      return id;
+      return id; // "" for the skip rule
     }
   }
 

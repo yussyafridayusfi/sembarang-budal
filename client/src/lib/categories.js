@@ -17,6 +17,7 @@ export const CATEGORY_COLORS = {
   essential: "#e03131",
   transport: "#495057",
   education: "#1098ad",
+  vehicle: "#0b7285",
   service: "#a05a2c",
   other: "#868e96"
 };
@@ -34,9 +35,80 @@ export const CATEGORY_ICONS = {
   essential: "🏥",
   transport: "🚉",
   education: "🎓",
+  vehicle: "🛵",
   service: "🔧",
   other: "📍"
 };
+
+/**
+ * Quick filters offered inside the results for a category, for the moment
+ * someone is standing next to a flat tyre: "tambal ban", not "vehicle
+ * repair, 112 places". Each matches on the place's OSM / Overture type and on
+ * its name, because a tambal ban is usually tagged `shop=tyres` or not at all
+ * and simply called "Tambal Ban".
+ */
+const has = (pattern) => (text) => pattern.test(String(text || ""));
+
+export const QUICK_FILTERS = {
+  vehicle: [
+    {
+      id: "motor",
+      label: "Bengkel motor",
+      icon: "🛵",
+      match: (place) =>
+        has(/motorcycle/)(place.tagValue) || has(/(bengkel motor|motor|ahass|yamaha|honda|suzuki|kawasaki|vespa)/i)(place.name)
+    },
+    {
+      id: "mobil",
+      label: "Bengkel mobil",
+      icon: "🚗",
+      match: (place) =>
+        has(/^car_repair$|^car$|automotive|auto_(repair|body|glass|detailing|customization|restoration|parts)|car_parts/)(place.tagValue) ||
+        has(/(bengkel mobil|mobil|auto ?care|toyota|daihatsu|mitsubishi|nissan|suzuki mobil)/i)(place.name)
+    },
+    {
+      id: "ban",
+      label: "Tambal ban",
+      icon: "🛞",
+      match: (place) => has(/tyre|tire/)(place.tagValue) || has(/tambal|ban|tyre|tire|velg/i)(place.name)
+    },
+    {
+      id: "cuci",
+      label: "Cuci kendaraan",
+      icon: "🫧",
+      match: (place) => has(/car_wash|detailing/)(place.tagValue) || has(/(cuci|wash|salon mobil|detailing)/i)(place.name)
+    }
+  ],
+  service: [
+    {
+      id: "hp",
+      label: "Servis HP & laptop",
+      icon: "📱",
+      match: (place) =>
+        has(/mobile_phone|computer|electronics_repair|it_service|appliance/)(place.tagValue) ||
+        has(/(hp|handphone|ponsel|laptop|komputer|elektronik|gadget)/i)(place.name)
+    },
+    {
+      id: "laundry",
+      label: "Laundry",
+      icon: "🧺",
+      match: (place) => has(/laundry|dry_clean/)(place.tagValue) || has(/laundry|laundromat/i)(place.name)
+    },
+    {
+      id: "salon",
+      label: "Salon & barber",
+      icon: "💈",
+      match: (place) =>
+        has(/hairdresser|beauty|barber|salon|nail/)(place.tagValue) || has(/(salon|barber|pangkas|potong rambut|cukur)/i)(place.name)
+    }
+  ]
+};
+
+/** The phone a row can dial directly, when its source carried one. */
+export function phoneOf(place) {
+  const tags = place?.tags || {};
+  return String(tags.phone || tags["contact:phone"] || tags["contact:mobile"] || "").trim();
+}
 
 export function colorFor(categoryId) {
   return CATEGORY_COLORS[categoryId] || CATEGORY_COLORS.other;

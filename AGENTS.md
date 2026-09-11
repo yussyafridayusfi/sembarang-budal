@@ -148,6 +148,10 @@ There is no test script.
   ratings; keep `basedOn` and `reviewCount` apart in the UI.
 - **Never invent place data.** Missing ratings, photos and phone numbers are
   reported as unknown, not filled in with plausible values.
+- **Quick filters live in `client/src/lib/categories.js`, not in the server
+  taxonomy.** `QUICK_FILTERS` cuts a category's results by type *and* name
+  ("Tambal ban" is `shop=tyres` or just a name). Add a filter there; the
+  results list renders whatever is present with a count.
 - **Upstream plumbing is not shown to the person.** Failed Photon queries and
   background collection are retried by `App.vue` (20 s for the categories
   that did not complete, 75 s for the background fill, immediately when a place
