@@ -163,6 +163,21 @@ export const CATEGORY_GROUPS = [
       ["amenity", ["school", "university", "college", "library", "kindergarten"]]
     ],
     searchTerms: ["sekolah", "universitas", "kampus", "perpustakaan"]
+  },
+  {
+    // Somewhere to open a laptop for the day. OSM tags coworking two ways
+    // (office=coworking is the common one in Indonesia); warnet are kept here
+    // rather than under cafe because a warnet is a place to sit at a computer,
+    // not a place to drink coffee.
+    id: "coworking",
+    label: "Coworking",
+    icon: "coworking",
+    tags: [
+      ["office", ["coworking"]],
+      ["amenity", ["coworking_space", "internet_cafe"]],
+      ["leisure", ["hackerspace"]]
+    ],
+    searchTerms: ["coworking", "co-working", "ruang kerja", "working space", "warnet", "meeting room"]
   }
 ];
 

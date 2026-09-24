@@ -677,6 +677,16 @@ with its resolved address. A row that cannot be placed is marked in red with
 a role="alert" notice names every such row, and nothing is saved until they are
 fixed.
 
+### Coworking
+
+💻 **Coworking** is somewhere to open a laptop for the day: `office=coworking`
+(the common Indonesian tagging - Milieu Space and Koridor in Surabaya),
+`amenity=coworking_space`, `leisure=hackerspace`, and `amenity=internet_cafe`.
+Warnet sit here rather than under cafe because a warnet is a place to sit at a
+computer, not to drink coffee; the Overture importer used to file its 84
+`internet_cafe` rows as cafes for the same reason. The Find row splits the two:
+*Coworking space* and *Warnet & gaming*.
+
 ### Bengkel & tambal ban, and Services & repair
 
 Two categories for the places people go to get something fixed. **🛵 Bengkel &

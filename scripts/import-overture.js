@@ -35,6 +35,8 @@ const RULES = [
   // consultancies, government offices, "hair supply" wholesalers.
   ["", /company|manufactur|distributor|wholesale|consultant|coaching|retirement|surgical|_supply|department_of|government|agency|office$/],
   ["vehicle", /automotive|auto_|tire|tyre|car_wash|motorcycle|car_repair|car_dealer|car_parts|bicycle_repair|vehicle_repair|boat_service|body_shop/],
+  // Before cafe: "internet_cafe" is a warnet, not a coffee shop.
+  ["coworking", /cowork|shared_office|business_center|internet_cafe|hackerspace|virtual_office/],
   ["cafe", /ice_cream|gelato|coffee|cafe|tea_room|tea_house|bubble_tea|boba|juice|bakery|patisserie|dessert|donut|pastry/],
   ["entertainment", /karaoke|cinema|movie|theater|theatre|arcade|bowling|gym|fitness|amusement|billiard|escape_room|water_park|golf/],
   ["nightlife", /night_club|nightclub|\bbar\b|_bar$|^bar_|pub$|brewery|lounge|hookah|shisha/],
