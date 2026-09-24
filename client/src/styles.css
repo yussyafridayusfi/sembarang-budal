@@ -38,6 +38,7 @@
   --cat-education: #1098ad;
   --cat-vehicle: #0b7285;
   --cat-service: #a05a2c;
+  --cat-coworking: #3b5bdb;
   --cat-other: #868e96;
 
   font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
@@ -753,6 +754,7 @@ button {
 .chip-education.active { background: var(--cat-education); }
 .chip-vehicle.active { background: var(--cat-vehicle); }
 .chip-service.active { background: var(--cat-service); }
+.chip-coworking.active { background: var(--cat-coworking); }
 
 /* ---------- Buttons ---------- */
 
@@ -1059,6 +1061,7 @@ kbd {
 .tag-education { background: var(--cat-education); }
 .tag-vehicle { background: var(--cat-vehicle); }
 .tag-service { background: var(--cat-service); }
+.tag-coworking { background: var(--cat-coworking); }
 
 .place-list {
   display: flex;

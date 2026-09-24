@@ -19,6 +19,7 @@ export const CATEGORY_COLORS = {
   education: "#1098ad",
   vehicle: "#0b7285",
   service: "#a05a2c",
+  coworking: "#3b5bdb",
   other: "#868e96"
 };
 
@@ -37,6 +38,7 @@ export const CATEGORY_ICONS = {
   education: "🎓",
   vehicle: "🛵",
   service: "🔧",
+  coworking: "💻",
   other: "📍"
 };
 
@@ -77,6 +79,22 @@ export const QUICK_FILTERS = {
       label: "Cuci kendaraan",
       icon: "🫧",
       match: (place) => has(/car_wash|detailing/)(place.tagValue) || has(/(cuci|wash|salon mobil|detailing)/i)(place.name)
+    }
+  ],
+  coworking: [
+    {
+      id: "cowork",
+      label: "Coworking space",
+      icon: "💻",
+      match: (place) =>
+        has(/cowork|shared_office|business_center|hackerspace/)(place.tagValue) ||
+        has(/(cowork|co-work|working space|ruang kerja|office space|hub|studio kerja)/i)(place.name)
+    },
+    {
+      id: "warnet",
+      label: "Warnet & gaming",
+      icon: "🖥️",
+      match: (place) => has(/internet_cafe/)(place.tagValue) || has(/(warnet|net|e-?sport|gaming|game ?center)/i)(place.name)
     }
   ],
   service: [
