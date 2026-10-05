@@ -677,6 +677,30 @@ with its resolved address. A row that cannot be placed is marked in red with
 a role="alert" notice names every such row, and nothing is saved until they are
 fixed.
 
+### Find & review
+
+A third mode between Explore and Meet up, for the other question people ask of
+a maps app: not "what is around here" but "is this place any good". The search
+is the centre search - a name, a pasted Google Maps link, or lat,lng - and
+picking a result opens a review page in the panel while the map jumps to the
+place:
+
+- the headline (rating, how many ratings, price band, open now);
+- a **Summary**: Google's own review summary when the Places API is keyed;
+  otherwise one sentence that says only what the counts say - "Reviewers praise
+  tasty food and friendly staff (3 and 2 of 8); the recurring complaint is slow
+  service (2 of 8)" - then the 1–5★ histogram, the topics reviewers keep
+  raising, Google's pull-quotes, praised / complained-about themes side by
+  side, the dishes reviewers name, and whichever glance facts are known;
+- **Reviews**: every review text we hold, sortable newest / highest / lowest,
+  with photos and owner replies.
+
+"Every review text we hold" is eight from the public listing or five from the
+Places API, never all of them; the page says so and links the rest on Google
+Maps. The details come through the same builder and cache the detail sheet
+uses, so "Full details" opens instantly. The page is shareable:
+`#mode=review&id=way/123&c=lat,lng&n=Name`.
+
 ### Coworking
 
 💻 **Coworking** is somewhere to open a laptop for the day: `office=coworking`

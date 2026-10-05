@@ -19,6 +19,10 @@ const props = defineProps({
   routeLocations: { type: Array, default: () => [] },
   selectedPlaceId: { type: String, default: "" },
   hoveredPlaceId: { type: String, default: "" },
+  /** `{ lat, lng, zoom, token }`: fly here, then show the selected place. A
+   * new token re-flies to the same spot. Used by Find & review, where there
+   * is no search ring to fit. */
+  focus: { type: Object, default: null },
   /** Pixels of map hidden behind the floating sidebar, so fits stay visible. */
   insetLeft: { type: Number, default: 0 },
   locating: { type: Boolean, default: false }
@@ -382,6 +386,13 @@ function drawPlaces() {
   });
 
   clusterLayer.addLayers(markers);
+
+  // A place asked for before its marker existed.
+  if (pendingShowId && markersByPlaceId.has(pendingShowId)) {
+    const id = pendingShowId;
+    pendingShowId = "";
+    setTimeout(() => showPlace(id), 0);
+  }
 }
 
 /** Swap the icon of just the markers whose state changed - redrawing every pin
@@ -581,7 +592,13 @@ watch(
 function showPlace(id) {
   const marker = markersByPlaceId.get(id);
 
-  if (!marker || !map || !clusterLayer) {
+  if (!map || !clusterLayer) {
+    return;
+  }
+
+  // Not drawn yet - the next drawPlaces() picks it up.
+  if (!marker) {
+    pendingShowId = id;
     return;
   }
 
@@ -610,6 +627,31 @@ watch(
     } else {
       map?.closePopup();
     }
+  }
+);
+
+watch(
+  () => props.focus,
+  (focus) => {
+    if (!map || !focus) {
+      return;
+    }
+
+    const target = L.latLng(focus.lat, focus.lng);
+    const zoom = focus.zoom || 16;
+    const alreadyThere = map.getCenter().distanceTo(target) < 5 && map.getZoom() === zoom;
+
+    if (alreadyThere) {
+      // No move, so no moveend to open the popup from.
+      if (props.selectedPlaceId) {
+        showPlace(props.selectedPlaceId);
+      }
+      return;
+    }
+
+    // moveend opens the selected place's popup once the map has settled.
+    pendingShowId = props.selectedPlaceId || pendingShowId;
+    map.flyTo(target, zoom, { duration: 0.8 });
   }
 );
 

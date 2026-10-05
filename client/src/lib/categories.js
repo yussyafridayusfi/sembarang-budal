@@ -128,6 +128,21 @@ export function phoneOf(place) {
   return String(tags.phone || tags["contact:phone"] || tags["contact:mobile"] || "").trim();
 }
 
+/**
+ * A suggestion's address line without the name it repeats: "Royal Plaza, Jl.
+ * Ahmad Yani…" → "Jl. Ahmad Yani…". Empty when the address is the name.
+ */
+export function secondaryLine(suggestion) {
+  const name = String(suggestion?.name || "").trim();
+  const display = String(suggestion?.displayName || "").trim();
+
+  if (name && display.toLowerCase().startsWith(name.toLowerCase())) {
+    return display.slice(name.length).replace(/^[\s,–—-]+/, "");
+  }
+
+  return display === name ? "" : display;
+}
+
 export function colorFor(categoryId) {
   return CATEGORY_COLORS[categoryId] || CATEGORY_COLORS.other;
 }

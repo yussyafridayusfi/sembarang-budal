@@ -58,7 +58,8 @@ There is no test script.
 - `client/src/` — Vue 3 SPA; `MapView.vue` (Leaflet + markercluster, draggable
   centre and radius handle, popup cards), `PlaceSearchPanel.vue` (search,
   summary bar, chip strip), `PlaceResults.vue`, `PlaceDetailModal.vue` (bottom
-  sheet on phones), `MeetingPointPanel.vue`; `lib/categories.js` is the single
+  sheet on phones), `ReviewPanel.vue` (Find & review: one place, its summary
+  and every review text), `MeetingPointPanel.vue`; `lib/categories.js` is the single
   source for a category's colour, glyph and labels. `App.vue` keeps the search
   in the URL hash and recent centres in `localStorage`.
 - `nodemon.json` — dev API runs on `API_PORT=3000` and watches only `server/`;
@@ -148,6 +149,10 @@ There is no test script.
   ratings; keep `basedOn` and `reviewCount` apart in the UI.
 - **Never invent place data.** Missing ratings, photos and phone numbers are
   reported as unknown, not filled in with plausible values.
+- **Each mode owns the URL hash while it shows.** Explore writes
+  `#c=…&r=…&cat=…`, review writes `#mode=review&id=…&c=…&n=…`; `readHash`
+  tells them apart by `mode`. Switching modes rewrites the hash from that
+  mode's state, so a shared review link never reopens as a search.
 - **Quick filters live in `client/src/lib/categories.js`, not in the server
   taxonomy.** `QUICK_FILTERS` cuts a category's results by type *and* name
   ("Tambal ban" is `shop=tyres` or just a name). Add a filter there; the
