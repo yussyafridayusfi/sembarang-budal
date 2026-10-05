@@ -1,10 +1,11 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import MapView from "./components/MapView.vue";
 import PlaceSearchPanel from "./components/PlaceSearchPanel.vue";
 import PlaceResults from "./components/PlaceResults.vue";
 import PlaceDetailModal from "./components/PlaceDetailModal.vue";
 import MeetingPointPanel from "./components/MeetingPointPanel.vue";
+import ReviewPanel from "./components/ReviewPanel.vue";
 import {
   clearSavedRoute,
   fetchCategories,
@@ -49,6 +50,17 @@ const error = ref("");
 const routeLocations = ref([]);
 const routeCenter = ref(null);
 const routeSuggestedRadius = ref(DEFAULT_RADIUS);
+
+/* ---------------------------------------------------------- find & review */
+
+/** The one place under review, and its details (shared cache with the sheet). */
+const reviewPlace = ref(null);
+const reviewDetails = ref(null);
+const reviewLoading = ref(false);
+const reviewError = ref("");
+let reviewController = null;
+/** Where the map should fly for the place under review. */
+const mapFocus = ref(null);
 
 /* ---------------------------------------------------------- install (PWA) */
 
@@ -129,6 +141,10 @@ const resetItems = computed(() => {
     );
   }
 
+  if (reviewPlace.value) {
+    items.push("the place under review");
+  }
+
   return items;
 });
 
@@ -184,6 +200,11 @@ async function resetAll() {
   routeCenter.value = null;
   routeSuggestedRadius.value = DEFAULT_RADIUS;
 
+  reviewController?.abort();
+  reviewPlace.value = null;
+  reviewDetails.value = null;
+  reviewError.value = "";
+
   mode.value = "explore";
   sidebarOpen.value = true;
   sheetState.value = "half";
@@ -196,6 +217,8 @@ async function resetAll() {
 
 const selectedPlaceId = computed(() => selectedPlace.value?.id || "");
 const places = computed(() => result.value?.places || []);
+/** In review mode the map shows just the place under review. */
+const mapPlaces = computed(() => (mode.value === "review" ? (reviewPlace.value ? [reviewPlace.value] : []) : places.value));
 const hasResults = computed(() => Boolean(result.value));
 
 /* --------------------------------------------------------------- recents */
@@ -243,16 +266,54 @@ function readHash() {
   const [lat, lng] = (params.get("c") || "").split(",").map(Number);
   const r = Number(params.get("r"));
   const cats = (params.get("cat") || "").split(",").filter(Boolean);
+  const point = Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+
+  // #mode=review&id=way/123&c=lat,lng&n=Name&t=type - a review page.
+  if (params.get("mode") === "review" && point) {
+    return {
+      review: {
+        id: params.get("id") || `point/${lat},${lng}`,
+        lat,
+        lng,
+        name: params.get("n") || "",
+        type: params.get("t") || "",
+        address: params.get("a") || "",
+        categoryId: params.get("cat") || "other"
+      }
+    };
+  }
 
   return {
-    center: Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null,
+    center: point,
     radius: Number.isFinite(r) && r >= 200 && r <= 30000 ? r : null,
     categories: cats.length ? cats : null,
     keyword: params.get("q") || ""
   };
 }
 
+function writeReviewHash() {
+  const place = reviewPlace.value;
+
+  if (!place) {
+    history.replaceState(null, "", window.location.pathname);
+    return;
+  }
+
+  const params = new URLSearchParams({ mode: "review", id: place.id, c: `${place.lat.toFixed(5)},${place.lng.toFixed(5)}` });
+
+  if (place.name) params.set("n", place.name);
+  if (place.tagValue || place.type) params.set("t", place.tagValue || place.type);
+  if (place.categoryId && place.categoryId !== "other") params.set("cat", place.categoryId);
+
+  history.replaceState(null, "", `#${params.toString()}`);
+}
+
 function writeHash() {
+  if (mode.value === "review") {
+    writeReviewHash();
+    return;
+  }
+
   if (!center.value) {
     return;
   }
@@ -504,6 +565,115 @@ async function openDetails(place) {
   }
 }
 
+/**
+ * A suggestion (or a place off the map) becomes the place under review. The
+ * details come through the same builder and cache the detail sheet uses, so
+ * opening "Full details" afterwards costs nothing.
+ */
+async function reviewPlaceFrom(suggestion) {
+  const lat = Number(suggestion.lat);
+  const lng = Number(suggestion.lng);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return;
+  }
+
+  const place = {
+    id: suggestion.id || (suggestion.osmType && suggestion.osmId ? `${suggestion.osmType}/${suggestion.osmId}` : `point/${lat},${lng}`),
+    lat,
+    lng,
+    name: suggestion.name || suggestion.displayName || "",
+    tagValue: suggestion.tagValue || suggestion.type || "",
+    type: suggestion.tagValue || suggestion.type || "",
+    categoryId: suggestion.categoryId || "other",
+    address: suggestion.address || suggestion.displayName || "",
+    googleId: suggestion.googleId || "",
+    placeId: suggestion.placeId || ""
+  };
+
+  reviewController?.abort();
+  reviewController = new AbortController();
+  reviewPlace.value = place;
+  reviewDetails.value = null;
+  reviewError.value = "";
+  writeReviewHash();
+
+  // The map draws the place first, then is asked to fly to it and show it.
+  await nextTick();
+  selectedPlace.value = place;
+  mapFocus.value = { lat, lng, zoom: 16, token: Date.now() };
+
+  if (isMobile.value) {
+    sheetState.value = "half";
+  }
+
+  if (detailsCache.has(place.id)) {
+    reviewDetails.value = detailsCache.get(place.id);
+    return;
+  }
+
+  reviewLoading.value = true;
+
+  try {
+    const details = await fetchPlaceDetails(place, reviewController.signal);
+    detailsCache.set(place.id, details);
+    reviewDetails.value = details;
+    // The sheet's category and name are better than the suggestion's.
+    reviewPlace.value = { ...place, categoryId: details.categoryId || place.categoryId, name: details.name || place.name };
+  } catch (err) {
+    if (err.name !== "AbortError") {
+      reviewError.value = err.message;
+    }
+  } finally {
+    reviewLoading.value = false;
+  }
+}
+
+function clearReview() {
+  reviewController?.abort();
+  reviewPlace.value = null;
+  reviewDetails.value = null;
+  reviewError.value = "";
+  selectedPlace.value = null;
+  mapFocus.value = null;
+  writeReviewHash();
+}
+
+/** The sheet, for the place under review, from the details already loaded. */
+function openReviewDetails() {
+  if (!reviewPlace.value) {
+    return;
+  }
+
+  selectedPlace.value = reviewPlace.value;
+  selectedDetails.value = reviewDetails.value;
+  detailError.value = reviewError.value;
+  detailLoading.value = reviewLoading.value;
+  detailOpen.value = true;
+}
+
+// Each mode owns the hash while it is showing.
+watch(mode, (next) => {
+  if (next === "review") {
+    writeReviewHash();
+    selectedPlace.value = reviewPlace.value;
+
+    if (reviewPlace.value) {
+      mapFocus.value = { lat: reviewPlace.value.lat, lng: reviewPlace.value.lng, zoom: 16, token: Date.now() };
+    }
+  } else {
+    if (selectedPlace.value && selectedPlace.value === reviewPlace.value) {
+      selectedPlace.value = null;
+    }
+
+    if (center.value) {
+      writeHash();
+    } else {
+      history.replaceState(null, "", window.location.pathname);
+    }
+  }
+});
+
 function handleRouteSaved(payload) {
   routeLocations.value = payload.locations || [];
   routeCenter.value = payload.center || null;
@@ -576,7 +746,7 @@ function onGlobalKeydown(event) {
   if (event.key === "/" && !/^(input|textarea|select)$/i.test(event.target?.tagName || "")) {
     event.preventDefault();
     sidebarOpen.value = true;
-    document.getElementById("centre-search")?.focus();
+    document.getElementById(mode.value === "review" ? "review-search" : "centre-search")?.focus();
   }
 }
 
@@ -593,13 +763,19 @@ onMounted(async () => {
 
   const fromHash = readHash();
 
+  if (fromHash.review) {
+    mode.value = "review";
+  }
+
   if (fromHash.radius) radius.value = fromHash.radius;
   if (fromHash.categories) selectedCategories.value = fromHash.categories;
   if (fromHash.keyword) keyword.value = fromHash.keyword;
 
   await Promise.all([loadCategories(), loadSavedRoute()]);
 
-  if (fromHash.center) {
+  if (fromHash.review) {
+    reviewPlaceFrom(fromHash.review);
+  } else if (fromHash.center) {
     setCenter(fromHash.center);
   }
 });
@@ -638,7 +814,8 @@ if (launchParams.toString()) {
     <MapView
       :center="center"
       :radius="radius"
-      :places="places"
+      :places="mapPlaces"
+      :focus="mapFocus"
       :route-locations="routeLocations"
       :selected-place-id="selectedPlaceId"
       :hovered-place-id="hoveredPlaceId"
@@ -716,6 +893,15 @@ if (launchParams.toString()) {
             @click="mode = 'explore'"
           >
             Explore
+          </button>
+          <button
+            type="button"
+            role="tab"
+            :aria-selected="mode === 'review'"
+            :class="{ active: mode === 'review' }"
+            @click="mode = 'review'"
+          >
+            Find &amp; review
           </button>
           <button
             type="button"
@@ -798,6 +984,19 @@ if (launchParams.toString()) {
           <p class="welcome-tip">Tip: press <kbd>/</kbd> to jump to the search box.</p>
         </section>
       </template>
+
+      <ReviewPanel
+        v-else-if="mode === 'review'"
+        :key="resetToken"
+        :map-center="searchBias"
+        :place="reviewPlace"
+        :details="reviewDetails"
+        :loading="reviewLoading"
+        :error="reviewError"
+        @pick="reviewPlaceFrom"
+        @clear="clearReview"
+        @open-details="openReviewDetails"
+      />
 
       <MeetingPointPanel
         v-else

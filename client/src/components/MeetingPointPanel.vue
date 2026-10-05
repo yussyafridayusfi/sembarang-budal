@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch } from "vue";
 import { clearSavedRoute, saveRoute, searchLocations } from "../services/api";
+import { secondaryLine } from "../lib/categories";
 
 const props = defineProps({
   locations: { type: Array, default: () => [] },
@@ -181,18 +182,6 @@ function pickSuggestion(index, suggestion) {
   linkByRow.value = { ...linkByRow.value, [index]: null };
   areaByRow.value = { ...areaByRow.value, [index]: "" };
   openRow.value = -1;
-}
-
-/** "Royal Plaza, Jl. Ahmad Yani…" → "Jl. Ahmad Yani…": the name is already the heading. */
-function secondaryLine(suggestion) {
-  const name = String(suggestion.name || "").trim();
-  const display = String(suggestion.displayName || "").trim();
-
-  if (name && display.toLowerCase().startsWith(name.toLowerCase())) {
-    return display.slice(name.length).replace(/^[s,–—-]+/, "");
-  }
-
-  return display;
 }
 
 function formatDistance(metres) {

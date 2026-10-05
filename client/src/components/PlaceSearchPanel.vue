@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref, watch } from "vue";
 import { searchLocations } from "../services/api";
-import { formatRadius, iconFor, formatDistance } from "../lib/categories";
+import { formatDistance, formatRadius, iconFor, secondaryLine } from "../lib/categories";
 
 const props = defineProps({
   center: { type: Object, default: null },
@@ -19,18 +19,6 @@ const props = defineProps({
   /** The map's view centre, the search bias before a centre is chosen. */
   mapCenter: { type: Object, default: null }
 });
-
-/** "Royal Plaza, Jl. Ahmad Yani…" → "Jl. Ahmad Yani…": the name is already the heading. */
-function secondaryLine(suggestion) {
-  const name = String(suggestion.name || "").trim();
-  const display = String(suggestion.displayName || "").trim();
-
-  if (name && display.toLowerCase().startsWith(name.toLowerCase())) {
-    return display.slice(name.length).replace(/^[s,–—-]+/, "");
-  }
-
-  return display === name ? "" : display;
-}
 
 const emit = defineEmits([
   "update:radius",
